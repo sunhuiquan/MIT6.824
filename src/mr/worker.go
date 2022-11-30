@@ -30,10 +30,10 @@ func ihash(key string) int {
 
 func storeInterKV(kva []KeyValue, filename string) {
 	file, err := os.Create(filename)
-	defer file.Close()
 	if err != nil {
 		log.Fatalf("cannot open %v", filename)
 	}
+	defer file.Close()
 
 	encoder := json.NewEncoder(file)
 	for kv := range kva {
@@ -44,12 +44,10 @@ func storeInterKV(kva []KeyValue, filename string) {
 	}
 }
 
-//
 // main/mrworker.go calls this function.
-//
 func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string) string) {
 	// request task phase
-	reply := requestTask()
+	reply := requestMapTask()
 	if reply.taskNo == 0 {
 		return
 	}
@@ -87,16 +85,12 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 
 }
 
-//
-// example function to show how to make an RPC call to the master.
-//
-// the RPC argument and reply types are defined in rpc.go.
-//
-func requestTask() ReplyArgs {
+// request map task
+func requestMapTask() ReplyArgs {
 	args := RequestArgs{}
 	reply := ReplyArgs{}
 
-	err := call("Master.assignTask", &args, &reply)
+	err := call("Master.assignMapTask", &args, &reply)
 	if !err {
 		log.Fatal("TODO: should recall")
 	}
@@ -116,11 +110,7 @@ func informMapFinish(taskNo int) {
 	}
 }
 
-//
 // send an RPC request to the master, wait for the response.
-// usually returns true.
-// returns false if something goes wrong.
-//
 func call(rpcname string, args interface{}, reply interface{}) bool {
 	// c, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
 	sockname := masterSock()

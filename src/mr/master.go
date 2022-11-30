@@ -10,7 +10,6 @@ import (
 )
 
 type Master struct {
-	// Your definitions here.
 	numReduce int
 	files     []string
 	mapAssign []bool
@@ -18,14 +17,7 @@ type Master struct {
 	mutex     sync.Mutex
 }
 
-// Your code here -- RPC handlers for the worker to call.
-
-//
-// an example RPC handler.
-//
-// the RPC argument and reply types are defined in rpc.go.
-//
-func (m *Master) assignTask(args *RequestArgs, reply *ReplyArgs) error {
+func (m *Master) assignMapTask(args *RequestArgs, reply *ReplyArgs) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -51,9 +43,7 @@ func (m *Master) mapTaskFinish(args *RequestArgs, reply *ReplyArgs) error {
 	return nil
 }
 
-//
 // start a thread that listens for RPCs from worker.go
-//
 func (m *Master) server() {
 	rpc.Register(m)
 	rpc.HandleHTTP()
@@ -67,25 +57,16 @@ func (m *Master) server() {
 	go http.Serve(l, nil)
 }
 
-//
-// main/mrmaster.go calls Done() periodically to find out
-// if the entire job has finished.
-//
+// main/mrmaster.go calls Done() periodically to find out if the entire job has finished.
 func (m *Master) Done() bool {
 	ret := false
-
-	// Your code here.
 
 	return ret
 }
 
-//
-// create a Master.
-// main/mrmaster.go calls this function.
-// nReduce is the number of reduce tasks to use.
-//
+// create a Master and called by main/mrmaster.go
 func MakeMaster(files []string, nReduce int) *Master {
-	m := Master{mapIndex: 0, numReduce: nReduce, files: files, mapFinish: make([]bool, len(files))}
+	m := Master{numReduce: nReduce, files: files, mapAssign: make([]bool, len(files)), mapFinish: make([]bool, len(files))}
 
 	m.server()
 	return &m
