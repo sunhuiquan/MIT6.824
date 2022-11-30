@@ -1,10 +1,14 @@
 package mr
 
-import "fmt"
-import "log"
-import "net/rpc"
-import "hash/fnv"
-
+import (
+	"encoding/json"
+	"fmt"
+	"hash/fnv"
+	"io/ioutil"
+	"log"
+	"net/rpc"
+	"os"
+)
 
 //
 // Map functions return a slice of KeyValue.
@@ -24,17 +28,62 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
+func storeInterKV(kva []KeyValue, filename string) {
+	file, err := os.Create(filename)
+	defer file.Close()
+	if err != nil {
+		log.Fatalf("cannot open %v", filename)
+	}
+
+	encoder := json.NewEncoder(file)
+	for kv := range kva {
+		err := encoder.Encode(&kv)
+		if err != nil {
+			log.Fatal("cannot encode")
+		}
+	}
+}
 
 //
 // main/mrworker.go calls this function.
 //
-func Worker(mapf func(string, string) []KeyValue,
-	reducef func(string, []string) string) {
+func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string) string) {
+	// request task phase
+	reply := requestTask()
+	if reply.taskNo == 0 {
+		return
+	}
 
-	// Your worker implementation here.
+	taskFile := reply.file
+	if taskFile == "" {
+		return // done
+	}
 
-	// uncomment to send the Example RPC to the master.
-	// CallExample()
+	// map phase
+	file, err := os.Open(taskFile)
+	if err != nil {
+		log.Fatalf("cannot open %v", taskFile)
+	}
+	content, err := ioutil.ReadAll(file)
+	if err != nil {
+		log.Fatalf("cannot read %v", taskFile)
+	}
+	file.Close()
+	intermediate := mapf(taskFile, string(content))
+
+	numReduce := reply.numReduce
+	kvaSlides := make([][]KeyValue, numReduce)
+	length := len(intermediate)
+	for i := 0; i < length; i++ {
+		hashIndex := ihash(intermediate[i].Key) % numReduce
+		kvaSlides[hashIndex] = append(kvaSlides[hashIndex], intermediate[i])
+	}
+	for i := 0; i < numReduce; i++ {
+		interFileName := fmt.Sprintf("mr-%v-%v", reply.taskNo, i)
+		storeInterKV(kvaSlides[i], interFileName)
+	}
+
+	informMapFinish(reply.taskNo)
 
 }
 
@@ -43,22 +92,28 @@ func Worker(mapf func(string, string) []KeyValue,
 //
 // the RPC argument and reply types are defined in rpc.go.
 //
-func CallExample() {
+func requestTask() ReplyArgs {
+	args := RequestArgs{}
+	reply := ReplyArgs{}
 
-	// declare an argument structure.
-	args := ExampleArgs{}
+	err := call("Master.assignTask", &args, &reply)
+	if !err {
+		log.Fatal("TODO: should recall")
+	}
 
-	// fill in the argument(s).
-	args.X = 99
+	fmt.Printf("task file: %v\n", reply.file)
+	return reply
+}
 
-	// declare a reply structure.
-	reply := ExampleReply{}
+// inform master that map task is finished
+func informMapFinish(taskNo int) {
+	args := RequestArgs{taskNo}
+	reply := ReplyArgs{}
 
-	// send the RPC request, wait for the reply.
-	call("Master.Example", &args, &reply)
-
-	// reply.Y should be 100.
-	fmt.Printf("reply.Y %v\n", reply.Y)
+	err := call("Master.mapTaskFinish", &args, &reply)
+	if !err {
+		log.Fatal("TODO: should recall")
+	}
 }
 
 //

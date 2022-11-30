@@ -1,15 +1,21 @@
 package mr
 
-import "log"
-import "net"
-import "os"
-import "net/rpc"
-import "net/http"
-
+import (
+	"log"
+	"net"
+	"net/http"
+	"net/rpc"
+	"os"
+	"sync"
+)
 
 type Master struct {
 	// Your definitions here.
-
+	numReduce int
+	files     []string
+	mapAssign []bool
+	mapFinish []bool
+	mutex     sync.Mutex
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -19,11 +25,31 @@ type Master struct {
 //
 // the RPC argument and reply types are defined in rpc.go.
 //
-func (m *Master) Example(args *ExampleArgs, reply *ExampleReply) error {
-	reply.Y = args.X + 1
+func (m *Master) assignTask(args *RequestArgs, reply *ReplyArgs) error {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	len := len(m.mapAssign)
+	for i := 1; i < len; i++ {
+		if !m.mapAssign[i] {
+			m.mapAssign[i] = true
+			reply.file = m.files[i]
+			reply.taskNo = i
+			reply.numReduce = m.numReduce
+			return nil
+		}
+	}
+
+	reply.taskNo = -1
 	return nil
 }
 
+func (m *Master) mapTaskFinish(args *RequestArgs, reply *ReplyArgs) error {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.mapFinish[args.taskNo] = true
+	return nil
+}
 
 //
 // start a thread that listens for RPCs from worker.go
@@ -50,7 +76,6 @@ func (m *Master) Done() bool {
 
 	// Your code here.
 
-
 	return ret
 }
 
@@ -60,10 +85,7 @@ func (m *Master) Done() bool {
 // nReduce is the number of reduce tasks to use.
 //
 func MakeMaster(files []string, nReduce int) *Master {
-	m := Master{}
-
-	// Your code here.
-
+	m := Master{mapIndex: 0, numReduce: nReduce, files: files, mapFinish: make([]bool, len(files))}
 
 	m.server()
 	return &m
