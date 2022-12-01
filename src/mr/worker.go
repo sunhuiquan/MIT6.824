@@ -46,7 +46,8 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 	// map phase
 	reply := requestMapTask()
 	for {
-		// taskNo is -1 means there's no task to assign which doesn't mean all tasks have been finished
+		// taskNo is -1 means there's no task to assign now
+		// and it doesn't mean all tasks have been finished
 		if reply.done {
 			break
 		}
