@@ -10,18 +10,14 @@ import (
 	"os"
 )
 
-//
 // Map functions return a slice of KeyValue.
-//
 type KeyValue struct {
 	Key   string
 	Value string
 }
 
-//
 // use ihash(key) % NReduce to choose the reduce
 // task number for each KeyValue emitted by Map.
-//
 func ihash(key string) int {
 	h := fnv.New32a()
 	h.Write([]byte(key))
@@ -46,43 +42,45 @@ func storeInterKV(kva []KeyValue, filename string) {
 
 // main/mrworker.go calls this function.
 func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string) string) {
-	// request task phase
-	reply := requestMapTask()
-	if reply.taskNo == 0 {
-		return
-	}
-
-	taskFile := reply.file
-	if taskFile == "" {
-		return // done
-	}
-
 	// map phase
-	file, err := os.Open(taskFile)
-	if err != nil {
-		log.Fatalf("cannot open %v", taskFile)
-	}
-	content, err := ioutil.ReadAll(file)
-	if err != nil {
-		log.Fatalf("cannot read %v", taskFile)
-	}
-	file.Close()
-	intermediate := mapf(taskFile, string(content))
+	reply := requestMapTask()
+	if reply.taskNo != -1 {
+		taskFile := reply.file
+		if taskFile == "" {
+			return // done
+		}
 
-	numReduce := reply.numReduce
-	kvaSlides := make([][]KeyValue, numReduce)
-	length := len(intermediate)
-	for i := 0; i < length; i++ {
-		hashIndex := ihash(intermediate[i].Key) % numReduce
-		kvaSlides[hashIndex] = append(kvaSlides[hashIndex], intermediate[i])
-	}
-	for i := 0; i < numReduce; i++ {
-		interFileName := fmt.Sprintf("mr-%v-%v", reply.taskNo, i)
-		storeInterKV(kvaSlides[i], interFileName)
+		file, err := os.Open(taskFile)
+		if err != nil {
+			log.Fatalf("cannot open %v", taskFile)
+		}
+		content, err := ioutil.ReadAll(file)
+		if err != nil {
+			log.Fatalf("cannot read %v", taskFile)
+		}
+		file.Close()
+		intermediate := mapf(taskFile, string(content))
+
+		numReduce := reply.numReduce
+		kvaSlides := make([][]KeyValue, numReduce)
+		length := len(intermediate)
+		for i := 0; i < length; i++ {
+			hashIndex := ihash(intermediate[i].Key) % numReduce
+			kvaSlides[hashIndex] = append(kvaSlides[hashIndex], intermediate[i])
+		}
+		for i := 0; i < numReduce; i++ {
+			interFileName := fmt.Sprintf("mr-%v-%v", reply.taskNo, i)
+			storeInterKV(kvaSlides[i], interFileName)
+		}
+
+		informMapFinish(reply.taskNo)
 	}
 
-	informMapFinish(reply.taskNo)
-
+	// reduce phase
+	reply = requestReduceTask()
+	if reply.taskNo != -1 {
+		informReduceFinish(reply.taskNo)
+	}
 }
 
 // request map task
@@ -108,6 +106,31 @@ func informMapFinish(taskNo int) {
 	if !err {
 		log.Fatal("TODO: should recall")
 	}
+}
+
+// request reduce task
+func requestReduceTask() ReplyArgs {
+	// args := RequestArgs{}
+	reply := ReplyArgs{}
+
+	// err := call("Master.assignMapTask", &args, &reply)
+	// if !err {
+	// 	log.Fatal("TODO: should recall")
+	// }
+
+	// fmt.Printf("task file: %v\n", reply.file)
+	return reply
+}
+
+// inform master that reduce task is finished
+func informReduceFinish(taskNo int) {
+	// args := RequestArgs{taskNo}
+	// reply := ReplyArgs{}
+
+	// err := call("Master.mapTaskFinish", &args, &reply)
+	// if !err {
+	// 	log.Fatal("TODO: should recall")
+	// }
 }
 
 // send an RPC request to the master, wait for the response.

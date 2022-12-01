@@ -7,22 +7,34 @@ import (
 	"net/rpc"
 	"os"
 	"sync"
+	"time"
 )
 
 type Master struct {
-	numReduce int
-	files     []string
-	mapAssign []bool
-	mapFinish []bool
-	mutex     sync.Mutex
+	// map
+	files        []string
+	mapAssign    []bool
+	numMapFinish int
+	// reduce
+	numReduce       int
+	reduceAssign    []bool
+	numReduceFinish int
+	// lock
+	mutex sync.Mutex
 }
 
+// assign map task to worker
 func (m *Master) assignMapTask(args *RequestArgs, reply *ReplyArgs) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
+	reply.taskNo = -1
+	if m.numMapFinish == len(m.files) {
+		return nil
+	}
+
 	len := len(m.mapAssign)
-	for i := 1; i < len; i++ {
+	for i := 0; i < len; i++ {
 		if !m.mapAssign[i] {
 			m.mapAssign[i] = true
 			reply.file = m.files[i]
@@ -31,15 +43,49 @@ func (m *Master) assignMapTask(args *RequestArgs, reply *ReplyArgs) error {
 			return nil
 		}
 	}
-
-	reply.taskNo = -1
 	return nil
 }
 
+// recevie map task finish from worker
 func (m *Master) mapTaskFinish(args *RequestArgs, reply *ReplyArgs) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	m.mapFinish[args.taskNo] = true
+	m.numMapFinish++
+	return nil
+}
+
+// assign reduce task toi worker
+func (m *Master) assignReduceTask(args *RequestArgs, reply *ReplyArgs) error {
+	for {
+		m.mutex.Lock()
+		if m.numMapFinish == len(m.files) {
+			break
+		}
+		m.mutex.Unlock()
+		time.Sleep(time.Second)
+	}
+
+	defer m.mutex.Unlock()
+	reply.taskNo = -1
+	if m.numMapFinish == m.numReduce {
+		return nil
+	}
+
+	for i := 0; i < m.numReduce; i++ {
+		if !m.reduceAssign[i] {
+			m.reduceAssign[i] = true
+			reply.taskNo = i
+			return nil
+		}
+	}
+	return nil
+}
+
+// recevie reduce task finish from worker
+func (m *Master) mapReduceFinish(args *RequestArgs, reply *ReplyArgs) error {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.numReduceFinish++
 	return nil
 }
 
@@ -59,14 +105,16 @@ func (m *Master) server() {
 
 // main/mrmaster.go calls Done() periodically to find out if the entire job has finished.
 func (m *Master) Done() bool {
-	ret := false
-
-	return ret
+	if m.numReduceFinish == m.numReduce {
+		return true
+	}
+	return false
 }
 
 // create a Master and called by main/mrmaster.go
 func MakeMaster(files []string, nReduce int) *Master {
-	m := Master{numReduce: nReduce, files: files, mapAssign: make([]bool, len(files)), mapFinish: make([]bool, len(files))}
+	m := Master{files: files, mapAssign: make([]bool, len(files)), numMapFinish: 0,
+		numReduce: nReduce, reduceAssign: make([]bool, nReduce), numReduceFinish: 0}
 
 	m.server()
 	return &m
