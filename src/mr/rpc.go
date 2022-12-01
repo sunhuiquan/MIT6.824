@@ -18,6 +18,7 @@ type RequestArgs struct {
 type ReplyArgs struct {
 	numReduce int
 	file      string
+	done      bool
 	taskNo    int // task number for which input file
 }
 

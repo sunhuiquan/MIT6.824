@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/rpc"
 	"os"
+	"time"
 )
 
 // Map functions return a slice of KeyValue.
@@ -44,42 +45,62 @@ func storeInterKV(kva []KeyValue, filename string) {
 func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string) string) {
 	// map phase
 	reply := requestMapTask()
-	if reply.taskNo != -1 {
-		taskFile := reply.file
-		if taskFile == "" {
-			return // done
+	for {
+		// taskNo is -1 means there's no task to assign which doesn't mean all tasks have been finished
+		if reply.done {
+			break
 		}
 
-		file, err := os.Open(taskFile)
-		if err != nil {
-			log.Fatalf("cannot open %v", taskFile)
-		}
-		content, err := ioutil.ReadAll(file)
-		if err != nil {
-			log.Fatalf("cannot read %v", taskFile)
-		}
-		file.Close()
-		intermediate := mapf(taskFile, string(content))
+		if reply.taskNo != -1 {
+			taskFile := reply.file
+			if taskFile == "" {
+				return // done
+			}
 
-		numReduce := reply.numReduce
-		kvaSlides := make([][]KeyValue, numReduce)
-		length := len(intermediate)
-		for i := 0; i < length; i++ {
-			hashIndex := ihash(intermediate[i].Key) % numReduce
-			kvaSlides[hashIndex] = append(kvaSlides[hashIndex], intermediate[i])
-		}
-		for i := 0; i < numReduce; i++ {
-			interFileName := fmt.Sprintf("mr-%v-%v", reply.taskNo, i)
-			storeInterKV(kvaSlides[i], interFileName)
-		}
+			file, err := os.Open(taskFile)
+			if err != nil {
+				log.Fatalf("cannot open %v", taskFile)
+			}
+			content, err := ioutil.ReadAll(file)
+			if err != nil {
+				log.Fatalf("cannot read %v", taskFile)
+			}
+			file.Close()
+			intermediate := mapf(taskFile, string(content))
 
-		informMapFinish(reply.taskNo)
+			numReduce := reply.numReduce
+			kvaSlides := make([][]KeyValue, numReduce)
+			length := len(intermediate)
+			for i := 0; i < length; i++ {
+				hashIndex := ihash(intermediate[i].Key) % numReduce
+				kvaSlides[hashIndex] = append(kvaSlides[hashIndex], intermediate[i])
+			}
+			for i := 0; i < numReduce; i++ {
+				interFileName := fmt.Sprintf("mr-%v-%v", reply.taskNo, i)
+				storeInterKV(kvaSlides[i], interFileName)
+			}
+
+			informMapFinish(reply.taskNo)
+		} else {
+			// other workers are working on remain tasks, sleep to avoid spin race and free cpu
+			time.Sleep(time.Second)
+		}
 	}
 
 	// reduce phase
 	reply = requestReduceTask()
-	if reply.taskNo != -1 {
-		informReduceFinish(reply.taskNo)
+	for {
+		if reply.done {
+			break
+		}
+
+		// TODO
+
+		if reply.taskNo != -1 {
+			informReduceFinish(reply.taskNo)
+		} else {
+			time.Sleep(time.Second)
+		}
 	}
 }
 

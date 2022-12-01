@@ -30,9 +30,11 @@ func (m *Master) assignMapTask(args *RequestArgs, reply *ReplyArgs) error {
 
 	reply.taskNo = -1
 	if m.numMapFinish == len(m.files) {
+		reply.done = true
 		return nil
 	}
 
+	reply.done = false
 	len := len(m.mapAssign)
 	for i := 0; i < len; i++ {
 		if !m.mapAssign[i] {
@@ -68,9 +70,11 @@ func (m *Master) receiveMapFinish(args *RequestArgs, reply *ReplyArgs) error {
 	defer m.mutex.Unlock()
 	reply.taskNo = -1
 	if m.numMapFinish == m.numReduce {
+		reply.done = true
 		return nil
 	}
 
+	reply.done = false
 	for i := 0; i < m.numReduce; i++ {
 		if !m.reduceAssign[i] {
 			m.reduceAssign[i] = true
