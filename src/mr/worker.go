@@ -92,8 +92,6 @@ func requestMapTask() ReplyArgs {
 	if !err {
 		log.Fatal("TODO: should recall")
 	}
-
-	fmt.Printf("task file: %v\n", reply.file)
 	return reply
 }
 
@@ -102,7 +100,7 @@ func informMapFinish(taskNo int) {
 	args := RequestArgs{taskNo}
 	reply := ReplyArgs{}
 
-	err := call("Master.mapTaskFinish", &args, &reply)
+	err := call("Master.receiveMapFinish", &args, &reply)
 	if !err {
 		log.Fatal("TODO: should recall")
 	}
@@ -110,27 +108,25 @@ func informMapFinish(taskNo int) {
 
 // request reduce task
 func requestReduceTask() ReplyArgs {
-	// args := RequestArgs{}
+	args := RequestArgs{}
 	reply := ReplyArgs{}
 
-	// err := call("Master.assignMapTask", &args, &reply)
-	// if !err {
-	// 	log.Fatal("TODO: should recall")
-	// }
-
-	// fmt.Printf("task file: %v\n", reply.file)
+	err := call("Master.assignReduceTask", &args, &reply)
+	if !err {
+		log.Fatal("TODO: should recall")
+	}
 	return reply
 }
 
 // inform master that reduce task is finished
 func informReduceFinish(taskNo int) {
-	// args := RequestArgs{taskNo}
-	// reply := ReplyArgs{}
+	args := RequestArgs{taskNo}
+	reply := ReplyArgs{}
 
-	// err := call("Master.mapTaskFinish", &args, &reply)
-	// if !err {
-	// 	log.Fatal("TODO: should recall")
-	// }
+	err := call("Master.receiveReduceFinish", &args, &reply)
+	if !err {
+		log.Fatal("TODO: should recall")
+	}
 }
 
 // send an RPC request to the master, wait for the response.

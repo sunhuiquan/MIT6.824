@@ -55,7 +55,7 @@ func (m *Master) mapTaskFinish(args *RequestArgs, reply *ReplyArgs) error {
 }
 
 // assign reduce task toi worker
-func (m *Master) assignReduceTask(args *RequestArgs, reply *ReplyArgs) error {
+func (m *Master) receiveMapFinish(args *RequestArgs, reply *ReplyArgs) error {
 	for {
 		m.mutex.Lock()
 		if m.numMapFinish == len(m.files) {
@@ -82,7 +82,7 @@ func (m *Master) assignReduceTask(args *RequestArgs, reply *ReplyArgs) error {
 }
 
 // recevie reduce task finish from worker
-func (m *Master) mapReduceFinish(args *RequestArgs, reply *ReplyArgs) error {
+func (m *Master) receiveReduceFinish(args *RequestArgs, reply *ReplyArgs) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.numReduceFinish++
