@@ -42,7 +42,7 @@ func storeInterKV(kva []KeyValue, filename string) {
 	defer file.Close()
 
 	encoder := json.NewEncoder(file)
-	for kv := range kva {
+	for _, kv := range kva {
 		err := encoder.Encode(&kv)
 		if err != nil {
 			log.Fatal("cannot encode")
@@ -52,7 +52,7 @@ func storeInterKV(kva []KeyValue, filename string) {
 
 // read intermediate kv values from mr-x-y
 func readInterKV(filename string) []KeyValue {
-	file, err := os.Create(filename)
+	file, err := os.Open(filename)
 	if err != nil {
 		log.Fatalf("cannot open %v", filename)
 	}
@@ -73,8 +73,9 @@ func readInterKV(filename string) []KeyValue {
 // main/mrworker.go calls this function.
 func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string) string) {
 	// map phase
-	reply := requestMapTask()
 	for {
+		reply := requestMapTask()
+
 		// taskNo is -1 means there's no task to assign now
 		// and it doesn't mean all tasks have been finished
 		if reply.Done {
@@ -114,8 +115,8 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 	}
 
 	// reduce phase
-	reply = requestReduceTask()
 	for {
+		reply := requestReduceTask()
 		if reply.Done {
 			break
 		}
@@ -207,7 +208,7 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 	sockname := masterSock()
 	c, err := rpc.DialHTTP("unix", sockname)
 	if err != nil {
-		log.Fatal("dialing:", err)
+		os.Exit(0) // assume master have done all work and end
 	}
 	defer c.Close()
 

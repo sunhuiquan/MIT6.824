@@ -113,6 +113,7 @@ func (m *Master) Done() bool {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	if m.numReduceFinish == m.numReduce {
+		time.Sleep(10 * time.Second) // TODO
 		return true
 	}
 	return false
