@@ -77,12 +77,12 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 	for {
 		// taskNo is -1 means there's no task to assign now
 		// and it doesn't mean all tasks have been finished
-		if reply.done {
+		if reply.Done {
 			break
 		}
 
-		if reply.taskNo != -1 {
-			taskFile := reply.file
+		if reply.TaskNo != -1 {
+			taskFile := reply.File
 			file, err := os.Open(taskFile)
 			if err != nil {
 				log.Fatalf("cannot open %v", taskFile)
@@ -94,7 +94,7 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 			file.Close()
 			intermediate := mapf(taskFile, string(content))
 
-			numReduce := reply.numReduce
+			numReduce := reply.NumReduce
 			kvaSlides := make([][]KeyValue, numReduce)
 			length := len(intermediate)
 			for i := 0; i < length; i++ {
@@ -102,11 +102,11 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 				kvaSlides[hashIndex] = append(kvaSlides[hashIndex], intermediate[i])
 			}
 			for i := 0; i < numReduce; i++ {
-				interFileName := fmt.Sprintf("mr-%v-%v", reply.taskNo, i)
+				interFileName := fmt.Sprintf("mr-%v-%v", reply.TaskNo, i)
 				storeInterKV(kvaSlides[i], interFileName)
 			}
 
-			informMapFinish(reply.taskNo)
+			informMapFinish(reply.TaskNo)
 		} else {
 			// other workers are working on remain tasks, sleep to avoid spin race and free cpu
 			time.Sleep(time.Second)
@@ -116,19 +116,19 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 	// reduce phase
 	reply = requestReduceTask()
 	for {
-		if reply.done {
+		if reply.Done {
 			break
 		}
 
-		if reply.taskNo != -1 {
+		if reply.TaskNo != -1 {
 			intermediate := []KeyValue{}
-			for i := 0; i < reply.numMap; i++ {
-				interFileName := fmt.Sprintf("mr-%v-%v", i, reply.taskNo)
+			for i := 0; i < reply.NumMap; i++ {
+				interFileName := fmt.Sprintf("mr-%v-%v", i, reply.TaskNo)
 				intermediate = append(intermediate, readInterKV(interFileName)...)
 			}
 			sort.Sort(KVArray(intermediate))
 
-			outFileName := fmt.Sprintf("mr-out-%v", reply.taskNo)
+			outFileName := fmt.Sprintf("mr-out-%v", reply.TaskNo)
 			outFile, _ := os.Create(outFileName)
 			i := 0
 			for i < len(intermediate) {
@@ -148,7 +148,7 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 			}
 			outFile.Close()
 
-			informReduceFinish(reply.taskNo)
+			informReduceFinish(reply.TaskNo)
 		} else {
 			time.Sleep(time.Second)
 		}
@@ -160,7 +160,7 @@ func requestMapTask() ReplyArgs {
 	args := RequestArgs{}
 	reply := ReplyArgs{}
 
-	err := call("Master.assignMapTask", &args, &reply)
+	err := call("Master.AssignMapTask", &args, &reply)
 	if !err {
 		log.Fatal("TODO: should recall")
 	}
@@ -172,7 +172,7 @@ func informMapFinish(taskNo int) {
 	args := RequestArgs{taskNo}
 	reply := ReplyArgs{}
 
-	err := call("Master.receiveMapFinish", &args, &reply)
+	err := call("Master.ReceiveMapFinish", &args, &reply)
 	if !err {
 		log.Fatal("TODO: should recall")
 	}
@@ -183,7 +183,7 @@ func requestReduceTask() ReplyArgs {
 	args := RequestArgs{}
 	reply := ReplyArgs{}
 
-	err := call("Master.assignReduceTask", &args, &reply)
+	err := call("Master.AssignReduceTask", &args, &reply)
 	if !err {
 		log.Fatal("TODO: should recall")
 	}
@@ -195,7 +195,7 @@ func informReduceFinish(taskNo int) {
 	args := RequestArgs{taskNo}
 	reply := ReplyArgs{}
 
-	err := call("Master.receiveReduceFinish", &args, &reply)
+	err := call("Master.ReceiveReduceFinish", &args, &reply)
 	if !err {
 		log.Fatal("TODO: should recall")
 	}

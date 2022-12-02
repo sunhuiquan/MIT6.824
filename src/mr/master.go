@@ -24,24 +24,24 @@ type Master struct {
 }
 
 // assign map task to worker
-func (m *Master) assignMapTask(args *RequestArgs, reply *ReplyArgs) error {
+func (m *Master) AssignMapTask(args *RequestArgs, reply *ReplyArgs) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	reply.taskNo = -1
+	reply.TaskNo = -1
 	if m.numMapFinish == len(m.files) {
-		reply.done = true
+		reply.Done = true
 		return nil
 	}
 
-	reply.done = false
+	reply.Done = false
 	len := len(m.mapAssign)
 	for i := 0; i < len; i++ {
 		if !m.mapAssign[i] {
 			m.mapAssign[i] = true
-			reply.file = m.files[i]
-			reply.taskNo = i
-			reply.numReduce = m.numReduce
+			reply.File = m.files[i]
+			reply.TaskNo = i
+			reply.NumReduce = m.numReduce
 			return nil
 		}
 	}
@@ -49,7 +49,7 @@ func (m *Master) assignMapTask(args *RequestArgs, reply *ReplyArgs) error {
 }
 
 // recevie map task finish from worker
-func (m *Master) receiveMapFinish(args *RequestArgs, reply *ReplyArgs) error {
+func (m *Master) ReceiveMapFinish(args *RequestArgs, reply *ReplyArgs) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.numMapFinish++
@@ -57,7 +57,7 @@ func (m *Master) receiveMapFinish(args *RequestArgs, reply *ReplyArgs) error {
 }
 
 // assign reduce task toi worker
-func (m *Master) assignReduceTask(args *RequestArgs, reply *ReplyArgs) error {
+func (m *Master) AssignReduceTask(args *RequestArgs, reply *ReplyArgs) error {
 	for {
 		m.mutex.Lock()
 		if m.numMapFinish == len(m.files) {
@@ -68,18 +68,18 @@ func (m *Master) assignReduceTask(args *RequestArgs, reply *ReplyArgs) error {
 	}
 
 	defer m.mutex.Unlock()
-	reply.taskNo = -1
+	reply.TaskNo = -1
 	if m.numMapFinish == m.numReduce {
-		reply.done = true
+		reply.Done = true
 		return nil
 	}
 
-	reply.done = false
+	reply.Done = false
 	for i := 0; i < m.numReduce; i++ {
 		if !m.reduceAssign[i] {
 			m.reduceAssign[i] = true
-			reply.taskNo = i
-			reply.numMap = len(m.files)
+			reply.TaskNo = i
+			reply.NumMap = len(m.files)
 			return nil
 		}
 	}
@@ -87,7 +87,7 @@ func (m *Master) assignReduceTask(args *RequestArgs, reply *ReplyArgs) error {
 }
 
 // recevie reduce task finish from worker
-func (m *Master) receiveReduceFinish(args *RequestArgs, reply *ReplyArgs) error {
+func (m *Master) ReceiveReduceFinish(args *RequestArgs, reply *ReplyArgs) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.numReduceFinish++
@@ -110,6 +110,8 @@ func (m *Master) server() {
 
 // main/mrmaster.go calls Done() periodically to find out if the entire job has finished.
 func (m *Master) Done() bool {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
 	if m.numReduceFinish == m.numReduce {
 		return true
 	}

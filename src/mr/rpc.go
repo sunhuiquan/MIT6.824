@@ -6,20 +6,20 @@ import (
 )
 
 type RequestArgs struct {
-	taskNo int // task number of map and reduce
+	TaskNo int // task number of map and reduce
 }
 
 type ReplyArgs struct {
 	// for map and reduce
-	taskNo int
-	done   bool
+	TaskNo int
+	Done   bool
 
 	// only for map task
-	numReduce int
-	file      string
+	NumReduce int
+	File      string
 
 	// only for map task
-	numMap int
+	NumMap int
 }
 
 // use unix domain socket
