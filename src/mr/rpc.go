@@ -17,6 +17,9 @@ type ReplyArgs struct {
 	// only for map task
 	numReduce int
 	file      string
+
+	// only for map task
+	numMap int
 }
 
 // use unix domain socket

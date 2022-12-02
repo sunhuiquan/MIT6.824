@@ -8,8 +8,16 @@ import (
 	"log"
 	"net/rpc"
 	"os"
+	"sort"
 	"time"
 )
+
+type KVArray []KeyValue
+
+// for sorting by KVArray
+func (kv KVArray) Len() int           { return len(kv) }
+func (kv KVArray) Swap(i, j int)      { kv[i], kv[j] = kv[j], kv[i] }
+func (kv KVArray) Less(i, j int) bool { return kv[i].Key < kv[j].Key }
 
 // Map functions return a slice of KeyValue.
 type KeyValue struct {
@@ -25,6 +33,7 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
+// store intermediate kv values to mr-x-y
 func storeInterKV(kva []KeyValue, filename string) {
 	file, err := os.Create(filename)
 	if err != nil {
@@ -41,6 +50,26 @@ func storeInterKV(kva []KeyValue, filename string) {
 	}
 }
 
+// read intermediate kv values from mr-x-y
+func readInterKV(filename string) []KeyValue {
+	file, err := os.Create(filename)
+	if err != nil {
+		log.Fatalf("cannot open %v", filename)
+	}
+	defer file.Close()
+
+	kva := []KeyValue{}
+	dec := json.NewDecoder(file)
+	for {
+		var kv KeyValue
+		if err := dec.Decode(&kv); err != nil {
+			break
+		}
+		kva = append(kva, kv)
+	}
+	return kva
+}
+
 // main/mrworker.go calls this function.
 func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string) string) {
 	// map phase
@@ -54,10 +83,6 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 
 		if reply.taskNo != -1 {
 			taskFile := reply.file
-			if taskFile == "" {
-				return // done
-			}
-
 			file, err := os.Open(taskFile)
 			if err != nil {
 				log.Fatalf("cannot open %v", taskFile)
@@ -95,9 +120,34 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 			break
 		}
 
-		// TODO
-
 		if reply.taskNo != -1 {
+			intermediate := []KeyValue{}
+			for i := 0; i < reply.numMap; i++ {
+				interFileName := fmt.Sprintf("mr-%v-%v", i, reply.taskNo)
+				intermediate = append(intermediate, readInterKV(interFileName)...)
+			}
+			sort.Sort(KVArray(intermediate))
+
+			outFileName := fmt.Sprintf("mr-out-%v", reply.taskNo)
+			outFile, _ := os.Create(outFileName)
+			i := 0
+			for i < len(intermediate) {
+				j := i + 1
+				for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+					j++
+				}
+				values := []string{}
+				for k := i; k < j; k++ {
+					values = append(values, intermediate[k].Value)
+				}
+				output := reducef(intermediate[i].Key, values)
+
+				fmt.Fprintf(outFile, "%v %v\n", intermediate[i].Key, output)
+
+				i = j
+			}
+			outFile.Close()
+
 			informReduceFinish(reply.taskNo)
 		} else {
 			time.Sleep(time.Second)
