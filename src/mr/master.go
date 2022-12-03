@@ -17,11 +17,13 @@ type Master struct {
 	files         []string
 	mapAssign     []bool
 	mapAssignTime []time.Time
+	mapFinish     []bool
 	numMapFinish  int
 	// reduce
 	numReduce        int
 	reduceAssign     []bool
 	reduceAssignTime []time.Time
+	reduceFinish     []bool
 	numReduceFinish  int
 	// lock
 	mutex sync.Mutex
@@ -57,7 +59,10 @@ func (m *Master) AssignMapTask(args *RequestArgs, reply *ReplyArgs) error {
 func (m *Master) ReceiveMapFinish(args *RequestArgs, reply *ReplyArgs) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	m.numMapFinish++
+	if !m.mapFinish[args.TaskNo] {
+		m.mapFinish[args.TaskNo] = true
+		m.numMapFinish++
+	}
 	return nil
 }
 
@@ -96,7 +101,10 @@ func (m *Master) AssignReduceTask(args *RequestArgs, reply *ReplyArgs) error {
 func (m *Master) ReceiveReduceFinish(args *RequestArgs, reply *ReplyArgs) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	m.numReduceFinish++
+	if !m.reduceFinish[args.TaskNo] {
+		m.reduceFinish[args.TaskNo] = true
+		m.numReduceFinish++
+	}
 	return nil
 }
 
@@ -118,16 +126,12 @@ func (m *Master) server() {
 func (m *Master) Done() bool {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	if m.numReduceFinish == m.numReduce {
-		time.Sleep(10 * time.Second) // TODO
-		return true
-	}
-	return false
+	return m.numReduceFinish == m.numReduce
 }
 
 // create a Master and called by main/mrmaster.go
 func MakeMaster(files []string, nReduce int) *Master {
-	m := Master{files: files, mapAssign: make([]bool, len(files)), mapAssignTime: make([]time.Time, len(files)), numMapFinish: 0, numReduce: nReduce, reduceAssign: make([]bool, nReduce), reduceAssignTime: make([]time.Time, nReduce), numReduceFinish: 0}
+	m := Master{files: files, mapAssign: make([]bool, len(files)), mapAssignTime: make([]time.Time, len(files)), mapFinish: make([]bool, len(files)), numMapFinish: 0, numReduce: nReduce, reduceAssign: make([]bool, nReduce), reduceAssignTime: make([]time.Time, nReduce), reduceFinish: make([]bool, nReduce), numReduceFinish: 0}
 
 	m.server()
 	return &m

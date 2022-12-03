@@ -37,7 +37,7 @@ func ihash(key string) int {
 func storeInterKV(kva []KeyValue, filename string) {
 	file, err := ioutil.TempFile(".", filename)
 	if err != nil {
-		log.Fatalf("cannot open %v", filename)
+		log.Fatalf("cannot create temp %v (%v)", filename, err)
 	}
 	defer file.Close()
 
@@ -45,17 +45,20 @@ func storeInterKV(kva []KeyValue, filename string) {
 	for _, kv := range kva {
 		err := encoder.Encode(&kv)
 		if err != nil {
-			log.Fatal("cannot encode")
+			log.Fatalf("cannot encode (%v)", err)
 		}
 	}
-	os.Rename(file.Name(), filename)
+	err = os.Rename(file.Name(), filename)
+	if err != nil {
+		log.Fatalf("fail to rename %v", err)
+	}
 }
 
 // read intermediate kv values from mr-x-y
 func readInterKV(filename string) []KeyValue {
 	file, err := os.Open(filename)
 	if err != nil {
-		log.Fatalf("cannot open %v", filename)
+		log.Fatalf("cannot open %v (%v)", filename, err)
 	}
 	defer file.Close()
 
@@ -87,11 +90,11 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 			taskFile := reply.File
 			file, err := os.Open(taskFile)
 			if err != nil {
-				log.Fatalf("cannot open %v", taskFile)
+				log.Fatalf("cannot open %v (%v)", taskFile, err)
 			}
 			content, err := ioutil.ReadAll(file)
 			if err != nil {
-				log.Fatalf("cannot read %v", taskFile)
+				log.Fatalf("cannot read %v (%v)", taskFile, err)
 			}
 			file.Close()
 			intermediate := mapf(taskFile, string(content))
@@ -131,7 +134,10 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 			sort.Sort(KVArray(intermediate))
 
 			outFileName := fmt.Sprintf("mr-out-%v", reply.TaskNo)
-			outFile, _ := ioutil.TempFile(".", outFileName)
+			outFile, err := ioutil.TempFile(".", outFileName)
+			if err != nil {
+				log.Fatalf("cannot create temp %v (%v)", outFileName, err)
+			}
 			i := 0
 			for i < len(intermediate) {
 				j := i + 1
