@@ -10,15 +10,19 @@ import (
 	"time"
 )
 
+const timeout = time.Second * 10
+
 type Master struct {
 	// map
-	files        []string
-	mapAssign    []bool
-	numMapFinish int
+	files         []string
+	mapAssign     []bool
+	mapAssignTime []time.Time
+	numMapFinish  int
 	// reduce
-	numReduce       int
-	reduceAssign    []bool
-	numReduceFinish int
+	numReduce        int
+	reduceAssign     []bool
+	reduceAssignTime []time.Time
+	numReduceFinish  int
 	// lock
 	mutex sync.Mutex
 }
@@ -37,8 +41,9 @@ func (m *Master) AssignMapTask(args *RequestArgs, reply *ReplyArgs) error {
 	reply.Done = false
 	len := len(m.mapAssign)
 	for i := 0; i < len; i++ {
-		if !m.mapAssign[i] {
+		if !m.mapAssign[i] || time.Now().After(m.mapAssignTime[i].Add(timeout)) {
 			m.mapAssign[i] = true
+			m.mapAssignTime[i] = time.Now()
 			reply.File = m.files[i]
 			reply.TaskNo = i
 			reply.NumReduce = m.numReduce
@@ -76,8 +81,9 @@ func (m *Master) AssignReduceTask(args *RequestArgs, reply *ReplyArgs) error {
 
 	reply.Done = false
 	for i := 0; i < m.numReduce; i++ {
-		if !m.reduceAssign[i] {
+		if !m.reduceAssign[i] || time.Now().After(m.reduceAssignTime[i].Add(timeout)) {
 			m.reduceAssign[i] = true
+			m.reduceAssignTime[i] = time.Now()
 			reply.TaskNo = i
 			reply.NumMap = len(m.files)
 			return nil
@@ -121,8 +127,7 @@ func (m *Master) Done() bool {
 
 // create a Master and called by main/mrmaster.go
 func MakeMaster(files []string, nReduce int) *Master {
-	m := Master{files: files, mapAssign: make([]bool, len(files)), numMapFinish: 0,
-		numReduce: nReduce, reduceAssign: make([]bool, nReduce), numReduceFinish: 0}
+	m := Master{files: files, mapAssign: make([]bool, len(files)), mapAssignTime: make([]time.Time, len(files)), numMapFinish: 0, numReduce: nReduce, reduceAssign: make([]bool, nReduce), reduceAssignTime: make([]time.Time, nReduce), numReduceFinish: 0}
 
 	m.server()
 	return &m

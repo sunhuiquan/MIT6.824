@@ -35,7 +35,7 @@ func ihash(key string) int {
 
 // store intermediate kv values to mr-x-y
 func storeInterKV(kva []KeyValue, filename string) {
-	file, err := os.Create(filename)
+	file, err := ioutil.TempFile(".", filename)
 	if err != nil {
 		log.Fatalf("cannot open %v", filename)
 	}
@@ -48,6 +48,7 @@ func storeInterKV(kva []KeyValue, filename string) {
 			log.Fatal("cannot encode")
 		}
 	}
+	os.Rename(file.Name(), filename)
 }
 
 // read intermediate kv values from mr-x-y
@@ -130,7 +131,7 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 			sort.Sort(KVArray(intermediate))
 
 			outFileName := fmt.Sprintf("mr-out-%v", reply.TaskNo)
-			outFile, _ := os.Create(outFileName)
+			outFile, _ := ioutil.TempFile(".", outFileName)
 			i := 0
 			for i < len(intermediate) {
 				j := i + 1
@@ -147,6 +148,7 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 
 				i = j
 			}
+			os.Rename(outFile.Name(), outFileName)
 			outFile.Close()
 
 			informReduceFinish(reply.TaskNo)
