@@ -3,3 +3,4 @@ MIT6.824 study notes and lab solutions.
 
 ## Lab 1: MapReduce
 
+![IMG](img/pass_lab1.png)
