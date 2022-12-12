@@ -18,6 +18,7 @@ package raft
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"../labrpc"
 )
@@ -52,6 +53,8 @@ const (
 	FOLLOWER
 	CANDIDATED
 )
+
+const electionTimeout = 150 * time.Millisecond // TODO: ??
 
 type Raft struct {
 	// meta data
@@ -139,6 +142,28 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.currentTerm = args.Term
 		reply.VoteGranted = true
 	}
+}
+
+type RequestAppendArgs struct {
+	Term         int
+	LeaderId     int
+	PrevLogIndex int
+	PrevLogTerm  int
+	LeaderCommit int
+	Entries      []Log // empty for heartbeat
+}
+
+type RequestAppendReply struct {
+	AppendSuccess bool
+}
+
+func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply) {
+	if len(args.Entries) == 0 { // heartbeat
+		rf.mu.Lock()
+
+		rf.mu.Unlock()
+	}
+
 }
 
 // The labrpc package simulates a lossy network, in which servers
