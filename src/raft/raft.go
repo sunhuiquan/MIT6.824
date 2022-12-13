@@ -52,12 +52,13 @@ type State int
 const (
 	LEADER State = iota
 	FOLLOWER
-	CANDIDATED
+	CANDIDATE
 )
 
 // tester requires that the leader send heartbeat RPCs no more than ten times per second.
 const timeoutBase = 900 * time.Millisecond
 const heartbeatPeriod = 150 * time.Millisecond
+const spinPeriod = 10 * time.Millisecond
 
 type Raft struct {
 	// meta data
@@ -126,7 +127,7 @@ func (rf *Raft) readPersist(data []byte) {
 
 type RequestVoteArgs struct {
 	Term         int
-	Candidateid  int
+	CandidateId  int
 	LastLogIndex int
 	LastLogTerm  int
 }
@@ -140,10 +141,16 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	if args.Term < rf.currentTerm {
+	lastLogIndex := len(rf.log) - 1
+	lastLogTerm := -1
+	if lastLogIndex != -1 {
+		lastLogTerm = rf.log[lastLogIndex].Term
+	}
+
+	reply.Term = rf.currentTerm // TODO ??
+	if rf.currentTerm >= args.Term || rf.votedFor != -1 || lastLogTerm > args.LastLogTerm || ((lastLogTerm == args.LastLogTerm) && lastLogIndex > args.LastLogIndex) {
 		reply.VoteGranted = false
-	} else if false { // TODO
-		rf.currentTerm = args.Term
+	} else {
 		reply.VoteGranted = true
 	}
 }
@@ -210,26 +217,81 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	return index, term, isLeader
 }
 
-func (rf *Raft) electionPeriod() {
+// start an election (follower -> candidate)
+func (rf *Raft) startElection() bool {
+	rf.mu.Lock()
+	rf.state = CANDIDATE
+	rf.votedFor = rf.me
+	rf.currentTerm++
+
+	lastLogIndex := len(rf.log) - 1
+	lastLogTerm := -1
+	if lastLogIndex != -1 {
+		lastLogTerm = rf.log[lastLogIndex].Term
+	}
+
+	args := RequestVoteArgs{Term: rf.currentTerm, CandidateId: rf.me, LastLogIndex: lastLogIndex, LastLogTerm: lastLogTerm}
+	reply := RequestVoteReply{}
+	rf.mu.Unlock()
+
+	var voteMutex sync.Mutex
+	pass := 0
+	fail := 0 // reject or network fault
+	numPeer := len(rf.peers)
+	winLimit := numPeer/2 + 1
+	for i := 0; i < numPeer; i++ {
+		if i != rf.me {
+			go func() {
+				if (rf.sendRequestVote(i, &args, &reply)) && reply.VoteGranted {
+					voteMutex.Lock()
+					pass++
+					voteMutex.Unlock()
+				} else {
+					voteMutex.Lock()
+					fail++
+					voteMutex.Unlock()
+				}
+			}()
+		}
+	}
+
+	waitStart := time.Now()
+	waitTimeout := timeoutBase + time.Duration(rand.Intn(900))*time.Millisecond
+	for {
+		if pass >= winLimit {
+			return true
+		} else if fail >= winLimit || time.Now().After(waitStart.Add(waitTimeout)) {
+			return false
+		}
+		time.Sleep(spinPeriod)
+	}
+}
+
+// win an election (candidate -> leader)
+func (rf *Raft) winElection() {
+	// TODO
+}
+
+func (rf *Raft) raftRun() {
+	rf.lastHeartbeatTime = time.Now()
 	rand.Seed(time.Now().UnixNano())
-	const spinPeriod = 10 * time.Millisecond
 	electionTimeout := timeoutBase + time.Duration(rand.Intn(900))*time.Millisecond
 
 	for {
 		time.Sleep(spinPeriod)
-		if time.Now().After(rf.lastHeartbeatTime.Add(electionTimeout)) {
-			electionTimeout = timeoutBase + time.Duration(rand.Intn(900))*time.Millisecond
-
-			rf.mu.Lock()
-			args := RequestVoteArgs{Term: 1}
-			reply := RequestVoteReply{}
+		rf.mu.Lock()
+		if rf.state == LEADER {
 			rf.mu.Unlock()
+			continue
+		}
 
-			numPeer := len(rf.peers)
-			for i := 0; i < numPeer; i++ {
-				if i != rf.me {
-					rf.sendRequestVote(i, &args, &reply)
-				}
+		limitTime := rf.lastHeartbeatTime.Add(electionTimeout)
+		rf.mu.Unlock()
+
+		if time.Now().After(limitTime) { // timeout
+			electionTimeout = timeoutBase + time.Duration(rand.Intn(900))*time.Millisecond
+			if rf.startElection() {
+				rf.winElection()
 			}
 		}
 	}
@@ -280,7 +342,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState()) // TODO
 
-	go rf.electionPeriod()
+	go rf.raftRun()
 
 	return rf
 }
