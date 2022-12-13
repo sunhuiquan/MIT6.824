@@ -16,6 +16,7 @@ package raft
 //   in the same server.
 
 import (
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -42,8 +43,8 @@ type ApplyMsg struct {
 }
 
 type Log struct {
-	term    int
-	command interface{}
+	Term    int
+	Command interface{}
 }
 
 type State int
@@ -54,7 +55,9 @@ const (
 	CANDIDATED
 )
 
-const electionTimeout = 150 * time.Millisecond // TODO: ??
+// tester requires that the leader send heartbeat RPCs no more than ten times per second.
+const timeoutBase = 900 * time.Millisecond
+const heartbeatPeriod = 150 * time.Millisecond
 
 type Raft struct {
 	// meta data
@@ -70,9 +73,10 @@ type Raft struct {
 	log         []Log
 
 	// volatile on all type
-	state       State // TODO: ??
-	commitIndex int
-	lastApplied int
+	state             State // TODO: ??
+	commitIndex       int
+	lastApplied       int
+	lastHeartbeatTime time.Time
 
 	// volatile on leader
 	nextIndex  int
@@ -206,6 +210,31 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	return index, term, isLeader
 }
 
+func (rf *Raft) electionPeriod() {
+	rand.Seed(time.Now().UnixNano())
+	const spinPeriod = 10 * time.Millisecond
+	electionTimeout := timeoutBase + time.Duration(rand.Intn(900))*time.Millisecond
+
+	for {
+		time.Sleep(spinPeriod)
+		if time.Now().After(rf.lastHeartbeatTime.Add(electionTimeout)) {
+			electionTimeout = timeoutBase + time.Duration(rand.Intn(900))*time.Millisecond
+
+			rf.mu.Lock()
+			args := RequestVoteArgs{Term: 1}
+			reply := RequestVoteReply{}
+			rf.mu.Unlock()
+
+			numPeer := len(rf.peers)
+			for i := 0; i < numPeer; i++ {
+				if i != rf.me {
+					rf.sendRequestVote(i, &args, &reply)
+				}
+			}
+		}
+	}
+}
+
 // the tester doesn't halt goroutines created by Raft after each test,
 // but it does call the Kill() method. your code can use killed() to
 // check whether Kill() has been called. the use of atomic avoids the
@@ -241,10 +270,17 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.persister = persister
 	rf.me = me
 
-	// Your initialization code here (2A, 2B, 2C).
+	rf.currentTerm = 0
+	rf.votedFor = -1
+
+	rf.state = FOLLOWER
+	rf.commitIndex = 0
+	rf.lastApplied = 0
 
 	// initialize from state persisted before a crash
-	rf.readPersist(persister.ReadRaftState())
+	rf.readPersist(persister.ReadRaftState()) // TODO
+
+	go rf.electionPeriod()
 
 	return rf
 }
