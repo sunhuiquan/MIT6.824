@@ -169,12 +169,12 @@ type RequestAppendReply struct {
 }
 
 func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply) {
-	if len(args.Entries) == 0 { // heartbeat
-		rf.mu.Lock()
+	rf.mu.Lock()
+	rf.lastHeartbeatTime = time.Now()
+	defer rf.mu.Unlock()
 
-		rf.mu.Unlock()
-	}
-
+	// if len(args.Entries) != 0 {
+	// }
 }
 
 // The labrpc package simulates a lossy network, in which servers
@@ -241,7 +241,7 @@ func (rf *Raft) startElection() bool {
 	winLimit := numPeer/2 + 1
 	for i := 0; i < numPeer; i++ {
 		if i != rf.me {
-			go func() {
+			go func(i int) {
 				if (rf.sendRequestVote(i, &args, &reply)) && reply.VoteGranted {
 					voteMutex.Lock()
 					pass++
@@ -251,7 +251,7 @@ func (rf *Raft) startElection() bool {
 					fail++
 					voteMutex.Unlock()
 				}
-			}()
+			}(i)
 		}
 	}
 
@@ -259,8 +259,10 @@ func (rf *Raft) startElection() bool {
 	waitTimeout := timeoutBase + time.Duration(rand.Intn(900))*time.Millisecond
 	for {
 		if pass >= winLimit {
+			DPrintf("success")
 			return true
 		} else if fail >= winLimit || time.Now().After(waitStart.Add(waitTimeout)) {
+			DPrintf("fail")
 			return false
 		}
 		time.Sleep(spinPeriod)
@@ -269,29 +271,44 @@ func (rf *Raft) startElection() bool {
 
 // win an election (candidate -> leader)
 func (rf *Raft) winElection() {
-	// TODO
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	rf.state = LEADER
 }
 
 func (rf *Raft) raftRun() {
 	rf.lastHeartbeatTime = time.Now()
 	rand.Seed(time.Now().UnixNano())
 	electionTimeout := timeoutBase + time.Duration(rand.Intn(900))*time.Millisecond
+	var heatbeatTime time.Duration
 
 	for {
 		time.Sleep(spinPeriod)
 		rf.mu.Lock()
 		if rf.state == LEADER {
+			heatbeatTime += spinPeriod
+			if (heatbeatTime > heartbeatPeriod) {
+
+				heatbeatTime = 0
+				args := RequestAppendArgs{}
+				reply := RequestAppendReply{}
+				rf.AppendEntries(&args, &reply)
+			}
 			rf.mu.Unlock()
-			continue
-		}
+		} else {
+			limitTime := rf.lastHeartbeatTime.Add(electionTimeout)
+			rf.mu.Unlock()
 
-		limitTime := rf.lastHeartbeatTime.Add(electionTimeout)
-		rf.mu.Unlock()
+			if time.Now().After(limitTime) { // timeout
+				electionTimeout = timeoutBase + time.Duration(rand.Intn(900))*time.Millisecond
+				if rf.startElection() {
+					rf.winElection()
 
-		if time.Now().After(limitTime) { // timeout
-			electionTimeout = timeoutBase + time.Duration(rand.Intn(900))*time.Millisecond
-			if rf.startElection() {
-				rf.winElection()
+					heatbeatTime = 0
+					args := RequestAppendArgs{}
+					reply := RequestAppendReply{}
+					rf.AppendEntries(&args, &reply)
+				}
 			}
 		}
 	}
