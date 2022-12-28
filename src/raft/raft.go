@@ -173,6 +173,10 @@ func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply
 	rf.lastHeartbeatTime = time.Now()
 	defer rf.mu.Unlock()
 
+	if rf.currentTerm < args.Term {
+		rf.currentTerm = args.Term // TODO
+	}
+
 	// if len(args.Entries) != 0 {
 	// }
 }
@@ -259,10 +263,8 @@ func (rf *Raft) startElection() bool {
 	waitTimeout := timeoutBase + time.Duration(rand.Intn(900))*time.Millisecond
 	for {
 		if pass >= winLimit {
-			DPrintf("success")
 			return true
 		} else if fail >= winLimit || time.Now().After(waitStart.Add(waitTimeout)) {
-			DPrintf("fail")
 			return false
 		}
 		time.Sleep(spinPeriod)
@@ -276,6 +278,11 @@ func (rf *Raft) winElection() {
 	rf.state = LEADER
 }
 
+func (rf *Raft) sendAppendEntry(server int, args *RequestAppendArgs, reply *RequestAppendReply) bool {
+	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
+	return ok
+}
+
 func (rf *Raft) raftRun() {
 	rf.lastHeartbeatTime = time.Now()
 	rand.Seed(time.Now().UnixNano())
@@ -286,28 +293,54 @@ func (rf *Raft) raftRun() {
 		time.Sleep(spinPeriod)
 		rf.mu.Lock()
 		if rf.state == LEADER {
-			heatbeatTime += spinPeriod
-			if (heatbeatTime > heartbeatPeriod) {
-
-				heatbeatTime = 0
-				args := RequestAppendArgs{}
-				reply := RequestAppendReply{}
-				rf.AppendEntries(&args, &reply)
-			}
 			rf.mu.Unlock()
+
+			heatbeatTime += spinPeriod
+			if heatbeatTime > heartbeatPeriod {
+				rf.mu.Lock()
+				args := RequestAppendArgs{Term: rf.currentTerm}
+				reply := RequestAppendReply{}
+				numPeer := len(rf.peers)
+				rf.mu.Unlock()
+
+				for i := 0; i < numPeer; i++ {
+					if i != rf.me {
+						go func(i int) {
+							rf.sendAppendEntry(i, &args, &reply)
+						}(i)
+					}
+				}
+				heatbeatTime = 0
+			}
 		} else {
 			limitTime := rf.lastHeartbeatTime.Add(electionTimeout)
 			rf.mu.Unlock()
 
 			if time.Now().After(limitTime) { // timeout
+
+				// DEBUG:
+				// rf.mu.Lock()
+				// DPrintf("node: %v, time: %v, timeout: %v", rf.me, time.Now(), limitTime)
+				// rf.mu.Unlock()
+
 				electionTimeout = timeoutBase + time.Duration(rand.Intn(900))*time.Millisecond
 				if rf.startElection() {
 					rf.winElection()
 
-					heatbeatTime = 0
-					args := RequestAppendArgs{}
+					rf.mu.Lock()
+					args := RequestAppendArgs{Term: rf.currentTerm}
 					reply := RequestAppendReply{}
-					rf.AppendEntries(&args, &reply)
+					numPeer := len(rf.peers)
+					rf.mu.Unlock()
+
+					for i := 0; i < numPeer; i++ {
+						if i != rf.me {
+							go func(i int) {
+								rf.sendAppendEntry(i, &args, &reply)
+							}(i)
+						}
+					}
+					heatbeatTime = 0
 				}
 			}
 		}
