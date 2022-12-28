@@ -224,6 +224,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 // start an election (follower -> candidate)
 func (rf *Raft) startElection() bool {
 	rf.mu.Lock()
+	DPrintf("------%v, %v", rf.me, time.Now())
 	rf.state = CANDIDATE
 	rf.votedFor = rf.me
 	rf.currentTerm++
@@ -260,11 +261,13 @@ func (rf *Raft) startElection() bool {
 	}
 
 	waitStart := time.Now()
-	waitTimeout := timeoutBase + time.Duration(rand.Intn(900))*time.Millisecond
+	waitTimeout := waitStart.Add(timeoutBase)
+	randomWaitTime := time.Duration(rand.Intn(900))*time.Millisecond
 	for {
 		if pass >= winLimit {
 			return true
-		} else if fail >= winLimit || time.Now().After(waitStart.Add(waitTimeout)) {
+		} else if fail >= winLimit || time.Now().After(waitTimeout) {
+			time.Sleep(randomWaitTime) // avoid vote split
 			return false
 		}
 		time.Sleep(spinPeriod)
