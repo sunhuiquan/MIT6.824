@@ -151,14 +151,10 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		lastLogTerm = rf.log[lastLogIndex].Term
 	}
 
-	DPrintf("RequestVote= argNode: %v, argTerm: %v, node: %v, term: %v", args.CandidateId, args.Term, rf.me, rf.currentTerm)
-
 	reply.Term = rf.currentTerm // TODO ??
 	if rf.currentTerm > args.Term || rf.votedFor != -1 || lastLogTerm > args.LastLogTerm || ((lastLogTerm == args.LastLogTerm) && lastLogIndex > args.LastLogIndex) {
-		DPrintf("false")
 		reply.VoteGranted = false
 	} else {
-		DPrintf("true")
 		rf.votedFor = args.CandidateId
 		reply.VoteGranted = true
 	}
@@ -252,7 +248,6 @@ func (rf *Raft) startElection() bool {
 	rf.state = CANDIDATE
 	rf.votedFor = -1 // clear state
 	rf.currentTerm++
-	DPrintf("startElection node: %v, term: %v", rf.me, rf.currentTerm)
 
 	lastLogIndex := len(rf.log) - 1
 	lastLogTerm := -1
@@ -290,14 +285,8 @@ func (rf *Raft) startElection() bool {
 	randomWaitTime := time.Duration(rand.Intn(900))*time.Millisecond
 	for {
 		if pass >= winLimit {
-			rf.mu.Lock()
-			DPrintf("elect successfully, leader: %v ,pass: %v, fail: %v, term: %v", rf.me, pass, fail, rf.currentTerm)
-			rf.mu.Unlock()
 			return true
 		} else if fail >= winLimit || time.Now().After(waitTimeout) {
-			rf.mu.Lock()
-			DPrintf("fail node: %v, pass: %v, fail: %v, term: %v", rf.me, pass, fail, rf.currentTerm)
-			rf.mu.Unlock()
 			time.Sleep(randomWaitTime) // avoid vote split
 			return false
 		}
