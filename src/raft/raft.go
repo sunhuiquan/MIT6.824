@@ -151,12 +151,14 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		lastLogTerm = rf.log[lastLogIndex].Term
 	}
 
-	// DPrintf("argNode: %v, argTerm: %v, node: %v, term: %v", args.CandidateId, args.Term, rf.me, rf.currentTerm)
+	DPrintf("RequestVote= argNode: %v, argTerm: %v, node: %v, term: %v", args.CandidateId, args.Term, rf.me, rf.currentTerm)
 
 	reply.Term = rf.currentTerm // TODO ??
-	if rf.currentTerm >= args.Term || rf.votedFor != -1 || lastLogTerm > args.LastLogTerm || ((lastLogTerm == args.LastLogTerm) && lastLogIndex > args.LastLogIndex) {
+	if rf.currentTerm > args.Term || rf.votedFor != -1 || lastLogTerm > args.LastLogTerm || ((lastLogTerm == args.LastLogTerm) && lastLogIndex > args.LastLogIndex) {
+		DPrintf("false")
 		reply.VoteGranted = false
 	} else {
+		DPrintf("true")
 		rf.votedFor = args.CandidateId
 		reply.VoteGranted = true
 	}
@@ -180,11 +182,13 @@ func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply
 	rf.lastHeartbeatTime = time.Now()
 	defer rf.mu.Unlock()
 
+	// TODO
 	if rf.currentTerm < args.Term {
 		if rf.state != FOLLOWER {
 			rf.state = FOLLOWER
 		}
-		rf.currentTerm = args.Term // TODO
+		rf.currentTerm = args.Term
+		rf.votedFor = -1
 	}
 
 	// if len(args.Entries) != 0 {
@@ -246,7 +250,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 func (rf *Raft) startElection() bool {
 	rf.mu.Lock()
 	rf.state = CANDIDATE
-	rf.votedFor = rf.me
+	rf.votedFor = -1 // clear state
 	rf.currentTerm++
 	DPrintf("startElection node: %v, term: %v", rf.me, rf.currentTerm)
 
@@ -287,15 +291,12 @@ func (rf *Raft) startElection() bool {
 	for {
 		if pass >= winLimit {
 			rf.mu.Lock()
-			
-			DPrintf("success node: %v, term: %v", rf.me, rf.currentTerm)
-			// DPrintf("elect successfully, leader: %v ,pass: %v, fail: %v, term: %v", rf.me, pass, fail, rf.currentTerm)
+			DPrintf("elect successfully, leader: %v ,pass: %v, fail: %v, term: %v", rf.me, pass, fail, rf.currentTerm)
 			rf.mu.Unlock()
 			return true
 		} else if fail >= winLimit || time.Now().After(waitTimeout) {
 			rf.mu.Lock()
-			// DPrintf("node: %v, pass: %v, fail: %v, term: %v", rf.me, pass, fail, rf.currentTerm)
-			// DPrintf("fail node: %v, term: %v", rf.me, rf.currentTerm)
+			DPrintf("fail node: %v, pass: %v, fail: %v, term: %v", rf.me, pass, fail, rf.currentTerm)
 			rf.mu.Unlock()
 			time.Sleep(randomWaitTime) // avoid vote split
 			return false
@@ -330,7 +331,6 @@ func (rf *Raft) raftRun() {
 			break
 		}
 
-		// DPrintf("- node: %v, state: %v, term: %v, %v", rf.me, rf.state, rf.currentTerm, GoID())
 		if rf.state == LEADER {
 			rf.mu.Unlock()
 
