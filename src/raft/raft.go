@@ -16,7 +16,11 @@ package raft
 //   in the same server.
 
 import (
+	"fmt"
 	"math/rand"
+	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -147,10 +151,13 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		lastLogTerm = rf.log[lastLogIndex].Term
 	}
 
+	// DPrintf("argNode: %v, argTerm: %v, node: %v, term: %v", args.CandidateId, args.Term, rf.me, rf.currentTerm)
+
 	reply.Term = rf.currentTerm // TODO ??
 	if rf.currentTerm >= args.Term || rf.votedFor != -1 || lastLogTerm > args.LastLogTerm || ((lastLogTerm == args.LastLogTerm) && lastLogIndex > args.LastLogIndex) {
 		reply.VoteGranted = false
 	} else {
+		rf.votedFor = args.CandidateId
 		reply.VoteGranted = true
 	}
 }
@@ -174,6 +181,9 @@ func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply
 	defer rf.mu.Unlock()
 
 	if rf.currentTerm < args.Term {
+		if rf.state != FOLLOWER {
+			rf.state = FOLLOWER
+		}
 		rf.currentTerm = args.Term // TODO
 	}
 
@@ -197,6 +207,17 @@ func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
 	return ok
+}
+
+func GoID() int {
+	var buf [64]byte
+	n := runtime.Stack(buf[:], false)
+	idField := strings.Fields(strings.TrimPrefix(string(buf[:n]), "goroutine "))[0]
+	id, err := strconv.Atoi(idField)
+	if err != nil {
+		panic(fmt.Sprintf("cannot get goroutine id: %v", err))
+	}
+	return id
 }
 
 // the service using Raft (e.g. a k/v server) wants to start
@@ -224,10 +245,10 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 // start an election (follower -> candidate)
 func (rf *Raft) startElection() bool {
 	rf.mu.Lock()
-	DPrintf("------%v, %v", rf.me, time.Now())
 	rf.state = CANDIDATE
 	rf.votedFor = rf.me
 	rf.currentTerm++
+	DPrintf("startElection node: %v, term: %v", rf.me, rf.currentTerm)
 
 	lastLogIndex := len(rf.log) - 1
 	lastLogTerm := -1
@@ -240,7 +261,7 @@ func (rf *Raft) startElection() bool {
 	rf.mu.Unlock()
 
 	var voteMutex sync.Mutex
-	pass := 0
+	pass := 1 // vote for itself
 	fail := 0 // reject or network fault
 	numPeer := len(rf.peers)
 	winLimit := numPeer/2 + 1
@@ -265,8 +286,17 @@ func (rf *Raft) startElection() bool {
 	randomWaitTime := time.Duration(rand.Intn(900))*time.Millisecond
 	for {
 		if pass >= winLimit {
+			rf.mu.Lock()
+			
+			DPrintf("success node: %v, term: %v", rf.me, rf.currentTerm)
+			// DPrintf("elect successfully, leader: %v ,pass: %v, fail: %v, term: %v", rf.me, pass, fail, rf.currentTerm)
+			rf.mu.Unlock()
 			return true
 		} else if fail >= winLimit || time.Now().After(waitTimeout) {
+			rf.mu.Lock()
+			// DPrintf("node: %v, pass: %v, fail: %v, term: %v", rf.me, pass, fail, rf.currentTerm)
+			// DPrintf("fail node: %v, term: %v", rf.me, rf.currentTerm)
+			rf.mu.Unlock()
 			time.Sleep(randomWaitTime) // avoid vote split
 			return false
 		}
@@ -295,6 +325,12 @@ func (rf *Raft) raftRun() {
 	for {
 		time.Sleep(spinPeriod)
 		rf.mu.Lock()
+		if rf.killed() {
+			rf.mu.Unlock()
+			break
+		}
+
+		// DPrintf("- node: %v, state: %v, term: %v, %v", rf.me, rf.state, rf.currentTerm, GoID())
 		if rf.state == LEADER {
 			rf.mu.Unlock()
 
@@ -320,12 +356,6 @@ func (rf *Raft) raftRun() {
 			rf.mu.Unlock()
 
 			if time.Now().After(limitTime) { // timeout
-
-				// DEBUG:
-				// rf.mu.Lock()
-				// DPrintf("node: %v, time: %v, timeout: %v", rf.me, time.Now(), limitTime)
-				// rf.mu.Unlock()
-
 				electionTimeout = timeoutBase + time.Duration(rand.Intn(900))*time.Millisecond
 				if rf.startElection() {
 					rf.winElection()
@@ -361,7 +391,6 @@ func (rf *Raft) raftRun() {
 // should call killed() to check whether it should stop.
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
-	// Your code here, if desired.
 }
 
 func (rf *Raft) killed() bool {
