@@ -246,7 +246,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 func (rf *Raft) startElection() bool {
 	rf.mu.Lock()
 	rf.state = CANDIDATE
-	rf.votedFor = -1 // clear state
+	rf.votedFor = rf.me
 	rf.currentTerm++
 
 	lastLogIndex := len(rf.log) - 1
@@ -287,6 +287,10 @@ func (rf *Raft) startElection() bool {
 		if pass >= winLimit {
 			return true
 		} else if fail >= winLimit || time.Now().After(waitTimeout) {
+			rf.mu.Lock()
+			rf.state = FOLLOWER
+			rf.votedFor = -1 // clear state
+			rf.mu.Unlock()
 			time.Sleep(randomWaitTime) // avoid vote split
 			return false
 		}
