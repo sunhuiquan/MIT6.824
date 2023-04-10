@@ -282,16 +282,20 @@ func (rf *Raft) startElection() bool {
 
 	waitStart := time.Now()
 	waitTimeout := waitStart.Add(timeoutBase)
-	randomWaitTime := time.Duration(rand.Intn(900))*time.Millisecond
 	for {
-		if pass >= winLimit {
+		voteMutex.Lock()
+		currPass := pass
+		currFail := fail
+		voteMutex.Unlock()
+
+		if currPass >= winLimit {
 			return true
-		} else if fail >= winLimit || time.Now().After(waitTimeout) {
+		} else if currFail >= winLimit || time.Now().After(waitTimeout) {
 			rf.mu.Lock()
 			rf.state = FOLLOWER
 			rf.votedFor = -1 // clear state
 			rf.mu.Unlock()
-			time.Sleep(randomWaitTime) // avoid vote split
+			time.Sleep(time.Duration(rand.Intn(900))*time.Millisecond) // avoid vote split
 			return false
 		}
 		time.Sleep(spinPeriod)
