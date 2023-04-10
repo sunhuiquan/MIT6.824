@@ -16,11 +16,7 @@ package raft
 //   in the same server.
 
 import (
-	"fmt"
 	"math/rand"
-	"runtime"
-	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -61,7 +57,7 @@ const (
 
 // tester requires that the leader send heartbeat RPCs no more than ten times per second.
 const timeoutBase = 900 * time.Millisecond
-const heartbeatPeriod = 150 * time.Millisecond
+const heartbeatIntervalPeriod = 150 * time.Millisecond
 const spinPeriod = 10 * time.Millisecond
 
 type Raft struct {
@@ -209,17 +205,6 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	return ok
 }
 
-func GoID() int {
-	var buf [64]byte
-	n := runtime.Stack(buf[:], false)
-	idField := strings.Fields(strings.TrimPrefix(string(buf[:n]), "goroutine "))[0]
-	id, err := strconv.Atoi(idField)
-	if err != nil {
-		panic(fmt.Sprintf("cannot get goroutine id: %v", err))
-	}
-	return id
-}
-
 // the service using Raft (e.g. a k/v server) wants to start
 // agreement on the next command to be appended to Raft's log. if this
 // server isn't the leader, returns false. otherwise start the
@@ -289,6 +274,9 @@ func (rf *Raft) startElection() bool {
 		voteMutex.Unlock()
 
 		if currPass >= winLimit {
+			voteMutex.Lock()
+			rf.state = LEADER
+			voteMutex.Unlock()
 			return true
 		} else if currFail >= winLimit || time.Now().After(waitTimeout) {
 			rf.mu.Lock()
@@ -302,23 +290,18 @@ func (rf *Raft) startElection() bool {
 	}
 }
 
-// win an election (candidate -> leader)
-func (rf *Raft) winElection() {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-	rf.state = LEADER
-}
-
 func (rf *Raft) sendAppendEntry(server int, args *RequestAppendArgs, reply *RequestAppendReply) bool {
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
 	return ok
 }
 
 func (rf *Raft) raftRun() {
-	rf.lastHeartbeatTime = time.Now()
-	rand.Seed(time.Now().UnixNano())
+	rf.mu.Lock()
+	rf.lastHeartbeatTime = time.Now() // init it before first leader is elected
+	rf.mu.Unlock()
+	rand.Seed(rand.Int63())
 	electionTimeout := timeoutBase + time.Duration(rand.Intn(900))*time.Millisecond
-	var heatbeatTime time.Duration
+	heatbeatPassTime := 0*time.Millisecond
 
 	for {
 		time.Sleep(spinPeriod)
@@ -331,22 +314,10 @@ func (rf *Raft) raftRun() {
 		if rf.state == LEADER {
 			rf.mu.Unlock()
 
-			heatbeatTime += spinPeriod
-			if heatbeatTime > heartbeatPeriod {
-				rf.mu.Lock()
-				args := RequestAppendArgs{Term: rf.currentTerm}
-				reply := RequestAppendReply{}
-				numPeer := len(rf.peers)
-				rf.mu.Unlock()
-
-				for i := 0; i < numPeer; i++ {
-					if i != rf.me {
-						go func(i int) {
-							rf.sendAppendEntry(i, &args, &reply)
-						}(i)
-					}
-				}
-				heatbeatTime = 0
+			heatbeatPassTime += spinPeriod
+			if heatbeatPassTime > heartbeatIntervalPeriod {
+				sendHeartBeat(rf)
+				heatbeatPassTime = 0
 			}
 		} else {
 			limitTime := rf.lastHeartbeatTime.Add(electionTimeout)
@@ -355,24 +326,26 @@ func (rf *Raft) raftRun() {
 			if time.Now().After(limitTime) { // timeout
 				electionTimeout = timeoutBase + time.Duration(rand.Intn(900))*time.Millisecond
 				if rf.startElection() {
-					rf.winElection()
-
-					rf.mu.Lock()
-					args := RequestAppendArgs{Term: rf.currentTerm}
-					reply := RequestAppendReply{}
-					numPeer := len(rf.peers)
-					rf.mu.Unlock()
-
-					for i := 0; i < numPeer; i++ {
-						if i != rf.me {
-							go func(i int) {
-								rf.sendAppendEntry(i, &args, &reply)
-							}(i)
-						}
-					}
-					heatbeatTime = 0
+					sendHeartBeat(rf)
+					heatbeatPassTime = 0
 				}
 			}
+		}
+	}
+}
+
+func sendHeartBeat(rf *Raft) {
+	rf.mu.Lock()
+	args := RequestAppendArgs{Term: rf.currentTerm}
+	reply := RequestAppendReply{}
+	numPeer := len(rf.peers)
+	rf.mu.Unlock()
+
+	for i := 0; i < numPeer; i++ {
+		if i != rf.me {
+			go func(i int) {
+				rf.sendAppendEntry(i, &args, &reply)
+			}(i)
 		}
 	}
 }
