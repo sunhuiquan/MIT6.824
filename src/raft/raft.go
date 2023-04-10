@@ -148,6 +148,11 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 
 	reply.Term = rf.currentTerm // TODO ??
+
+	// lastLogTerm > args.LastLogTerm || ((lastLogTerm == args.LastLogTerm) && lastLogIndex > args.LastLogIndex 这个是为了确保
+	// leader有着最新的日志 TODO 写成函数
+
+	// TODO 错误
 	if rf.currentTerm > args.Term || rf.votedFor != -1 || lastLogTerm > args.LastLogTerm || ((lastLogTerm == args.LastLogTerm) && lastLogIndex > args.LastLogIndex) {
 		reply.VoteGranted = false
 	} else {
@@ -175,7 +180,7 @@ func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply
 	defer rf.mu.Unlock()
 
 	// TODO
-	if rf.currentTerm < args.Term {
+	if rf.currentTerm < args.Term { // 位置错了，要当选举的同时就设置，更新一次term的时候同时更新voteFor属性
 		if rf.state != FOLLOWER {
 			rf.state = FOLLOWER
 		}
@@ -227,7 +232,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	return index, term, isLeader
 }
 
-// start an election (follower -> candidate)
+// start an election
 func (rf *Raft) startElection() bool {
 	rf.mu.Lock()
 	rf.state = CANDIDATE
@@ -276,12 +281,13 @@ func (rf *Raft) startElection() bool {
 		if currPass >= winLimit {
 			voteMutex.Lock()
 			rf.state = LEADER
+			rf.votedFor = -1
 			voteMutex.Unlock()
 			return true
 		} else if currFail >= winLimit || time.Now().After(waitTimeout) {
 			rf.mu.Lock()
 			rf.state = FOLLOWER
-			rf.votedFor = -1 // clear state
+			rf.votedFor = -1
 			rf.mu.Unlock()
 			time.Sleep(time.Duration(rand.Intn(900))*time.Millisecond) // avoid vote split
 			return false
