@@ -141,22 +141,25 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	lastLogIndex := len(rf.log) - 1
-	lastLogTerm := -1
-	if lastLogIndex != -1 {
-		lastLogTerm = rf.log[lastLogIndex].Term
+	if rf.currentTerm < args.Term {
+		rf.currentTerm = args.Term
+		rf.votedFor = -1
 	}
 
-	reply.Term = rf.currentTerm // TODO ??
+	// lastLogIndex := len(rf.log) - 1
+	// lastLogTerm := -1
+	// if lastLogIndex != -1 {
+	// 	lastLogTerm = rf.log[lastLogIndex].Term
+	// }
+	// lastLogTerm > args.LastLogTerm || ((lastLogTerm == args.LastLogTerm) && lastLogIndex > args.LastLogIndex 这个是为了确保 leader有着最新的日志, 写成函数
 
-	// lastLogTerm > args.LastLogTerm || ((lastLogTerm == args.LastLogTerm) && lastLogIndex > args.LastLogIndex 这个是为了确保
-	// leader有着最新的日志 TODO 写成函数
+	// if rf.currentTerm > args.Term || rf.votedFor != -1 || lastLogTerm > args.LastLogTerm || ((lastLogTerm == args.LastLogTerm) && lastLogIndex > args.LastLogIndex) {
 
-	// TODO 错误
-	if rf.currentTerm > args.Term || rf.votedFor != -1 || lastLogTerm > args.LastLogTerm || ((lastLogTerm == args.LastLogTerm) && lastLogIndex > args.LastLogIndex) {
+	if rf.currentTerm > args.Term || rf.votedFor != -1 {
 		reply.VoteGranted = false
 	} else {
 		rf.votedFor = args.CandidateId
+		rf.lastHeartbeatTime = time.Now()
 		reply.VoteGranted = true
 	}
 }
@@ -176,20 +179,21 @@ type RequestAppendReply struct {
 
 func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply) {
 	rf.mu.Lock()
-	rf.lastHeartbeatTime = time.Now()
 	defer rf.mu.Unlock()
+	if rf.currentTerm > args.Term {
+		reply.AppendSuccess = false
+		return
+	}
 
-	// TODO
-	if rf.currentTerm < args.Term { // 位置错了，要当选举的同时就设置，更新一次term的时候同时更新voteFor属性
-		if rf.state != FOLLOWER {
-			rf.state = FOLLOWER
-		}
+	rf.lastHeartbeatTime = time.Now()
+	if rf.state == LEADER || rf.state == CANDIDATE {
+		rf.state = FOLLOWER
+	}
+	if rf.currentTerm < args.Term {
 		rf.currentTerm = args.Term
 		rf.votedFor = -1
 	}
-
-	// if len(args.Entries) != 0 {
-	// }
+	reply.AppendSuccess = true
 }
 
 // The labrpc package simulates a lossy network, in which servers
@@ -351,6 +355,8 @@ func sendHeartBeat(rf *Raft) {
 		if i != rf.me {
 			go func(i int) {
 				rf.sendAppendEntry(i, &args, &reply)
+				// TODO: reply false, and reply term > rf.term -> become follower
+				// 封装把心跳/日志传输写成函数，注意这两者是通过同一套API，心跳不过是日志传输当没有新日志需要sync的情况罢了
 			}(i)
 		}
 	}
