@@ -68,20 +68,20 @@ type Raft struct {
 	me        int                 // this peer's index into peers[]
 	dead      int32               // set by Kill()
 
-	// persistent on all type
+	// persistent state on all servers
 	currentTerm int
 	votedFor    int
 	log         []Log
 
-	// volatile on all type
-	state             State // TODO: ??
-	commitIndex       int
-	lastApplied       int
-	lastHeartbeatTime time.Time
+	// volatile state on all servers
+	state             State
+	commitIndex       int // index of highest log entry known to be	committed
+	lastApplied       int // index of highest log entry applied to state machine
+	lastHeartbeatTime time.Time // last time of receiving a heart beat
 
-	// volatile on leader
-	nextIndex  int
-	matchIndex int
+	// volatile state on leaders and reinitialized after election
+	nextIndex  []int // next log entry to send 
+	matchIndex []int // highest log entry known to be replicated on server
 }
 
 // return currentTerm and whether this server believes it is the leader.
@@ -174,14 +174,15 @@ type RequestAppendArgs struct {
 }
 
 type RequestAppendReply struct {
-	AppendSuccess bool
+	Term int
+	Success bool
 }
 
 func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	if rf.currentTerm > args.Term {
-		reply.AppendSuccess = false
+		reply.Success = false
 		return
 	}
 
@@ -193,7 +194,7 @@ func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply
 		rf.currentTerm = args.Term
 		rf.votedFor = -1
 	}
-	reply.AppendSuccess = true
+	reply.Success = true
 }
 
 // The labrpc package simulates a lossy network, in which servers
@@ -214,6 +215,33 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	return ok
 }
 
+func syncLog(rf *Raft) {
+	rf.mu.Lock()
+	args := RequestAppendArgs {
+		Term: rf.currentTerm,
+		LeaderId: rf.me,
+		// PrevLogIndex: ,
+		// PrevLogTerm: ,
+		LeaderCommit: rf.commitIndex,
+		// Entries:
+	}
+
+	reply := RequestAppendReply {}
+	numPeer := len(rf.peers)
+	me := rf.me
+	rf.mu.Unlock()
+
+	for i := 0; i < numPeer; i++ {
+		if i != me {
+			go func(i int) {
+				rf.sendAppendEntry(i, &args, &reply)
+				// TODO: reply false, and reply term > rf.term -> become follower
+				// 封装把心跳/日志传输写成函数，注意这两者是通过同一套API，心跳不过是日志传输当没有新日志需要sync的情况罢了
+			}(i)
+		}
+	}
+}
+
 // the service using Raft (e.g. a k/v server) wants to start
 // agreement on the next command to be appended to Raft's log. if this
 // server isn't the leader, returns false. otherwise start the
@@ -227,13 +255,22 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 // term. the third return value is true if this server believes it is
 // the leader.
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	index := -1
-	term := -1
-	isLeader := true
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 
-	// Your code here (2B).
+	if rf.state != LEADER { //if this server isn't the leader, returns false.
+		return -1, -1, false
+	}
 
-	return index, term, isLeader
+	entry := Log {
+		Term: rf.currentTerm,
+		Command: command,
+	}
+	rf.log = append(rf.log, entry)
+
+	go syncLog(rf)
+
+	return len(rf.log) - 1, rf.currentTerm, true // return index, term, isLeader
 }
 
 // start an election
@@ -283,10 +320,14 @@ func (rf *Raft) startElection() bool {
 		voteMutex.Unlock()
 
 		if currPass >= winLimit {
-			voteMutex.Lock()
+			rf.mu.Lock()
 			rf.state = LEADER
 			rf.votedFor = -1
-			voteMutex.Unlock()
+			for i := 0; i < len(rf.peers); i++ {
+				rf.nextIndex[i] = len(rf.log)
+				rf.matchIndex[i] = 0
+			}
+			rf.mu.Unlock()
 			return true
 		} else if currFail >= winLimit || time.Now().After(waitTimeout) {
 			rf.mu.Lock()
@@ -349,10 +390,11 @@ func sendHeartBeat(rf *Raft) {
 	args := RequestAppendArgs{Term: rf.currentTerm}
 	reply := RequestAppendReply{}
 	numPeer := len(rf.peers)
+	me := rf.me
 	rf.mu.Unlock()
 
 	for i := 0; i < numPeer; i++ {
-		if i != rf.me {
+		if i != me {
 			go func(i int) {
 				rf.sendAppendEntry(i, &args, &reply)
 				// TODO: reply false, and reply term > rf.term -> become follower
@@ -402,6 +444,11 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.state = FOLLOWER
 	rf.commitIndex = 0
 	rf.lastApplied = 0
+
+	for range rf.peers {
+		rf.nextIndex = append(rf.nextIndex, 1)
+		rf.matchIndex = append(rf.matchIndex, 0)
+	}
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState()) // TODO
