@@ -183,7 +183,31 @@ func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply
 	defer rf.mu.Unlock()
 	if rf.currentTerm > args.Term {
 		reply.Success = false
+		reply.Term = rf.currentTerm
 		return
+	}
+
+	if args.PrevLogIndex > 0 && (args.PrevLogIndex - 1 >= len(rf.log) || rf.log[args.PrevLogIndex - 1].Term != args.PrevLogTerm) {
+		reply.Success = false
+		reply.Term = rf.currentTerm
+		return
+	}
+
+	for i, entry := range args.Entries {
+		index := args.PrevLogIndex + i
+		if index > len(rf.log) {
+			rf.log = append(rf.log, entry)
+		} else if rf.log[index].Term != entry.Term {
+			rf.log = rf.log[:index]
+			rf.log = append(rf.log, entry)
+		}
+	}
+ 
+	if args.LeaderCommit > rf.commitIndex {
+		rf.commitIndex = args.LeaderCommit
+		if len(rf.log) < rf.commitIndex {
+			rf.commitIndex = len(rf.log)
+		}
 	}
 
 	rf.lastHeartbeatTime = time.Now()
@@ -195,6 +219,7 @@ func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply
 		rf.votedFor = -1
 	}
 	reply.Success = true
+	reply.Term = rf.currentTerm
 }
 
 // The labrpc package simulates a lossy network, in which servers
@@ -213,32 +238,6 @@ func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
 	return ok
-}
-
-func syncLog(rf *Raft) {
-	rf.mu.Lock()
-	args := RequestAppendArgs {
-		Term: rf.currentTerm,
-		// PrevLogIndex: ,
-		// PrevLogTerm: ,
-		LeaderCommit: rf.commitIndex,
-		// Entries:
-	}
-
-	reply := RequestAppendReply {}
-	numPeer := len(rf.peers)
-	me := rf.me
-	rf.mu.Unlock()
-
-	for i := 0; i < numPeer; i++ {
-		if i != me {
-			go func(i int) {
-				rf.sendAppendEntry(i, &args, &reply)
-				// TODO: reply false, and reply term > rf.term -> become follower
-				// 封装把心跳/日志传输写成函数，注意这两者是通过同一套API，心跳不过是日志传输当没有新日志需要sync的情况罢了
-			}(i)
-		}
-	}
 }
 
 // the service using Raft (e.g. a k/v server) wants to start
@@ -408,11 +407,67 @@ func (rf *Raft)broadHeartBeat() {
 
 func (rf *Raft)syncLog(peer int) {
 	rf.mu.Lock()
-	args := RequestAppendArgs{Term: rf.currentTerm}
+	args := RequestAppendArgs{
+		Term: rf.currentTerm,
+		PrevLogIndex: rf.nextIndex[peer] - 1,
+		LeaderCommit: rf.commitIndex,
+		Entries: make([]Log, 0),
+	}
+
+	// has logs to sync
+	if args.PrevLogIndex > 0 {
+		args.PrevLogTerm = rf.log[args.PrevLogIndex - 1].Term
+		args.Entries = append(args.Entries, rf.log[args.PrevLogIndex:]...)
+	}
+
 	reply := RequestAppendReply{}
 	rf.mu.Unlock()
 
-	rf.sendAppendEntry(peer, &args, &reply)
+	if rf.sendAppendEntry(peer, &args, &reply) {
+		rf.mu.Lock()
+		defer rf.mu.Unlock()
+
+		if rf.currentTerm != args.Term {
+			return
+		}
+
+		if reply.Term > rf.currentTerm {
+			rf.state = FOLLOWER
+			rf.currentTerm = reply.Term
+			rf.votedFor = -1
+		}
+
+		if reply.Success {
+			// rf.nextIndex[id] += len(args1.Entries)
+			// rf.matchIndex[id] = rf.nextIndex[id] - 1
+
+			// // 数字N, 让peer[i]的大多数>=N
+			// // peer[0]' index=2
+			// // peer[1]' index=2
+			// // peer[2]' index=1
+			// // 1,2,2
+			// // 更新commitIndex, 就是找中位数
+			// sortedMatchIndex := make([]int, 0)
+			// sortedMatchIndex = append(sortedMatchIndex, len(rf.log))
+			// for i := 0; i < len(rf.peers); i++ {
+			// 	if i == rf.me {
+			// 		continue
+			// 	}
+			// 	sortedMatchIndex = append(sortedMatchIndex, rf.matchIndex[i])
+			// }
+			// sort.Ints(sortedMatchIndex)
+			// newCommitIndex := sortedMatchIndex[len(rf.peers) / 2]
+			// if newCommitIndex > rf.commitIndex && rf.log[newCommitIndex - 1].Term == rf.currentTerm {
+			// 	rf.commitIndex = newCommitIndex
+			// }
+			// // rf.commitIndex = minMatchIndex
+		} else {
+			rf.nextIndex[peer] -= 1
+			if rf.nextIndex[peer] < 1 {
+				rf.nextIndex[peer] = 1
+			}
+		}
+	}
 }
 
 // the tester doesn't halt goroutines created by Raft after each test,
