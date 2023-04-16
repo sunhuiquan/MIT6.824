@@ -268,8 +268,24 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 }
 
 func (rf *Raft)singleRequertVote(peer int, args RequestVoteArgs, reply RequestVoteReply) bool {
-	if rf.sendRequestVote(peer, &args, &reply) && reply.VoteGranted {
-		return true
+	rf.mu.Lock()
+	if rf.currentTerm != args.Term || rf.state != CANDIDATE {
+		return false
+	}
+	rf.mu.Unlock()
+
+	if rf.sendRequestVote(peer, &args, &reply) {
+		rf.mu.Lock()
+		if reply.Term > rf.currentTerm {
+			rf.currentTerm = reply.Term
+			rf.votedFor = -1
+			rf.state = FOLLOWER
+			rf.mu.Unlock()
+			return false
+		}
+		rf.mu.Unlock()
+
+		return reply.VoteGranted
 	}
 	return false
 }
