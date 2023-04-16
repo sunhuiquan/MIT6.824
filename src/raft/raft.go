@@ -17,6 +17,7 @@ package raft
 
 import (
 	"math/rand"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -329,7 +330,7 @@ func (rf *Raft) startElection() bool {
 			rf.state = LEADER
 			rf.votedFor = -1
 			for i := 0; i < len(rf.peers); i++ {
-				rf.nextIndex[i] = len(rf.log)
+				rf.nextIndex[i] = len(rf.log) + 1
 				rf.matchIndex[i] = 0
 			}
 			rf.mu.Unlock()
@@ -413,11 +414,9 @@ func (rf *Raft)syncLog(peer int) {
 		LeaderCommit: rf.commitIndex,
 		Entries: make([]Log, 0),
 	}
-
-	// has logs to sync
+	args.Entries = append(args.Entries, rf.log[args.PrevLogIndex:]...)
 	if args.PrevLogIndex > 0 {
 		args.PrevLogTerm = rf.log[args.PrevLogIndex - 1].Term
-		args.Entries = append(args.Entries, rf.log[args.PrevLogIndex:]...)
 	}
 
 	reply := RequestAppendReply{}
@@ -438,29 +437,24 @@ func (rf *Raft)syncLog(peer int) {
 		}
 
 		if reply.Success {
-			// rf.nextIndex[id] += len(args1.Entries)
-			// rf.matchIndex[id] = rf.nextIndex[id] - 1
+			rf.nextIndex[peer] += len(args.Entries)
+			rf.matchIndex[peer] = rf.nextIndex[peer] - 1
 
-			// // 数字N, 让peer[i]的大多数>=N
-			// // peer[0]' index=2
-			// // peer[1]' index=2
-			// // peer[2]' index=1
-			// // 1,2,2
-			// // 更新commitIndex, 就是找中位数
-			// sortedMatchIndex := make([]int, 0)
-			// sortedMatchIndex = append(sortedMatchIndex, len(rf.log))
-			// for i := 0; i < len(rf.peers); i++ {
-			// 	if i == rf.me {
-			// 		continue
-			// 	}
-			// 	sortedMatchIndex = append(sortedMatchIndex, rf.matchIndex[i])
-			// }
-			// sort.Ints(sortedMatchIndex)
-			// newCommitIndex := sortedMatchIndex[len(rf.peers) / 2]
-			// if newCommitIndex > rf.commitIndex && rf.log[newCommitIndex - 1].Term == rf.currentTerm {
-			// 	rf.commitIndex = newCommitIndex
-			// }
-			// // rf.commitIndex = minMatchIndex
+			matchIndexes := make([]int, 0)
+			for i := 0; i < len(rf.peers); i++ {
+				if i == rf.me { // leader won't set it's own matchIndex and nextIndex
+				matchIndexes = append(matchIndexes, len(rf.log))
+				} else {
+					matchIndexes = append(matchIndexes, rf.matchIndex[i])
+				}
+			}
+			sort.Ints(matchIndexes)
+			newCommitIndex := matchIndexes[len(rf.peers) / 2]
+			// rf.log[newCommitIndex - 1].Term == rf.currentTerm is used to limit leader only can commit it's term's log
+			// see this issue on raft paper's topic 5.4.2
+			if newCommitIndex > rf.commitIndex && rf.log[newCommitIndex - 1].Term == rf.currentTerm {
+				rf.commitIndex = newCommitIndex
+			}
 		} else {
 			rf.nextIndex[peer] -= 1
 			if rf.nextIndex[peer] < 1 {
@@ -520,6 +514,29 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.readPersist(persister.ReadRaftState()) // TODO
 
 	go rf.raftRun()
+	go rf.applyMessage(applyCh)
 
 	return rf
+}
+
+func (rf *Raft) applyMessage(applyCh chan ApplyMsg) {
+	for !rf.killed(){
+		time.Sleep(10 * time.Millisecond)
+
+		rf.mu.Lock()
+		var messages = make([]ApplyMsg, 0)
+		for rf.commitIndex > rf.lastApplied {
+			rf.lastApplied += 1
+			messages = append(messages, ApplyMsg{
+				CommandValid: true,
+				Command:      rf.log[rf.lastApplied-1].Command,
+				CommandIndex: rf.lastApplied,
+			})
+		}
+		rf.mu.Unlock()
+
+		for _, msg := range messages {
+			applyCh <- msg
+		}
+	}
 }
