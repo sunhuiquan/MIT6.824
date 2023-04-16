@@ -147,16 +147,13 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.votedFor = -1
 	}
 
-	// lastLogIndex := len(rf.log) - 1
-	// lastLogTerm := -1
-	// if lastLogIndex != -1 {
-	// 	lastLogTerm = rf.log[lastLogIndex].Term
-	// }
-	// lastLogTerm > args.LastLogTerm || ((lastLogTerm == args.LastLogTerm) && lastLogIndex > args.LastLogIndex 这个是为了确保 leader有着最新的日志, 写成函数
+	lastLogIndex := len(rf.log)
+	lastLogTerm := -1
+	if lastLogIndex > 0 {
+		lastLogTerm = rf.log[lastLogIndex - 1].Term
+	}
 
-	// if rf.currentTerm > args.Term || rf.votedFor != -1 || lastLogTerm > args.LastLogTerm || ((lastLogTerm == args.LastLogTerm) && lastLogIndex > args.LastLogIndex) {
-
-	if rf.currentTerm > args.Term || rf.votedFor != -1 {
+	if rf.currentTerm > args.Term || rf.votedFor != -1 || lastLogTerm > args.LastLogTerm || ((lastLogTerm == args.LastLogTerm) && lastLogIndex > args.LastLogIndex) { // 确保 leader有着最新的日志
 		reply.VoteGranted = false
 	} else {
 		rf.votedFor = args.CandidateId
@@ -284,10 +281,10 @@ func (rf *Raft) startElection() bool {
 	rf.votedFor = rf.me
 	rf.currentTerm++
 
-	lastLogIndex := len(rf.log) - 1
+	lastLogIndex := len(rf.log)
 	lastLogTerm := -1
-	if lastLogIndex != -1 {
-		lastLogTerm = rf.log[lastLogIndex].Term
+	if lastLogIndex > 0 {
+		lastLogTerm = rf.log[lastLogIndex - 1].Term
 	}
 
 	args := RequestVoteArgs{Term: rf.currentTerm, CandidateId: rf.me, LastLogIndex: lastLogIndex, LastLogTerm: lastLogTerm}
@@ -456,8 +453,7 @@ func (rf *Raft)syncLog(peer int) {
 
 			// rf.log[newCommitIndex - 1].Term == rf.currentTerm is used to limit leader only can commit it's term's log
 			// see this issue on raft paper's topic 5.4.2
-			DPrintf1("node: %v, isLeader: %v, peer: %v, newCommitIndex: %v, rf.commitIndex: %v", rf.me, (rf.state == LEADER),
-			peer, newCommitIndex, rf.commitIndex)
+			DPrintf2("node: %v, isLeader: %v, peer: %v, newCommitIndex: %v, rf.commitIndex: %v", rf.me, (rf.state == LEADER), peer, newCommitIndex, rf.commitIndex)
 			if newCommitIndex > rf.commitIndex && rf.log[newCommitIndex - 1].Term == rf.currentTerm {
 				rf.commitIndex = newCommitIndex
 			}
