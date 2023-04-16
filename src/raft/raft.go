@@ -196,7 +196,7 @@ func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply
 
 	for i, entry := range args.Entries {
 		index := args.PrevLogIndex + i
-		if index > len(rf.log) {
+		if index >= len(rf.log) {
 			rf.log = append(rf.log, entry)
 		} else if rf.log[index].Term != entry.Term {
 			rf.log = rf.log[:index]
@@ -266,9 +266,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		Command: command,
 	}
 	rf.log = append(rf.log, entry)
-	index := len(rf.log) - 1
 
-	return index, rf.currentTerm, true // return index, term, isLeader
+	return len(rf.log), rf.currentTerm, true // return index, term, isLeader
 }
 
 func (rf *Raft)singleRequertVote(peer int, args RequestVoteArgs, reply RequestVoteReply) bool {
@@ -439,6 +438,8 @@ func (rf *Raft)syncLog(peer int) {
 		if reply.Success {
 			rf.nextIndex[peer] += len(args.Entries)
 			rf.matchIndex[peer] = rf.nextIndex[peer] - 1
+			DPrintf1("node: %v, isLeader: %v, peer: %v, nextIndex: %v, matchIndex: %v", rf.me, (rf.state == LEADER),
+			peer, rf.nextIndex[peer], rf.matchIndex[peer])
 
 			matchIndexes := make([]int, 0)
 			for i := 0; i < len(rf.peers); i++ {
@@ -450,8 +451,13 @@ func (rf *Raft)syncLog(peer int) {
 			}
 			sort.Ints(matchIndexes)
 			newCommitIndex := matchIndexes[len(rf.peers) / 2]
+			DPrintf1("node: %v, isLeader: %v, peer: %v, newCommitIndex: %v", rf.me, (rf.state == LEADER),
+			peer, newCommitIndex)
+
 			// rf.log[newCommitIndex - 1].Term == rf.currentTerm is used to limit leader only can commit it's term's log
 			// see this issue on raft paper's topic 5.4.2
+			DPrintf1("node: %v, isLeader: %v, peer: %v, newCommitIndex: %v, rf.commitIndex: %v", rf.me, (rf.state == LEADER),
+			peer, newCommitIndex, rf.commitIndex)
 			if newCommitIndex > rf.commitIndex && rf.log[newCommitIndex - 1].Term == rf.currentTerm {
 				rf.commitIndex = newCommitIndex
 			}
@@ -519,6 +525,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	return rf
 }
 
+// for test we need to apply all messages from all server, in reality we no need to do that
 func (rf *Raft) applyMessage(applyCh chan ApplyMsg) {
 	for !rf.killed(){
 		time.Sleep(10 * time.Millisecond)
@@ -527,6 +534,7 @@ func (rf *Raft) applyMessage(applyCh chan ApplyMsg) {
 		var messages = make([]ApplyMsg, 0)
 		for rf.commitIndex > rf.lastApplied {
 			rf.lastApplied += 1
+			DPrintf2("node: %v, isLeader: %v, lastApplied: %v, command: %v", rf.me, rf.state == LEADER, rf.lastApplied, rf.log[rf.lastApplied-1].Command)
 			messages = append(messages, ApplyMsg{
 				CommandValid: true,
 				Command:      rf.log[rf.lastApplied-1].Command,
