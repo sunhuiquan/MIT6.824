@@ -179,15 +179,16 @@ type RequestAppendReply struct {
 func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	reply.Success = false
+	reply.Term = rf.currentTerm
+
 	if rf.currentTerm > args.Term {
-		reply.Success = false
-		reply.Term = rf.currentTerm
 		return
 	}
 
+	rf.lastHeartbeatTime = time.Now()
+
 	if args.PrevLogIndex > 0 && (args.PrevLogIndex - 1 >= len(rf.log) || rf.log[args.PrevLogIndex - 1].Term != args.PrevLogTerm) {
-		reply.Success = false
-		reply.Term = rf.currentTerm
 		return
 	}
 
@@ -208,7 +209,6 @@ func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply
 		}
 	}
 
-	rf.lastHeartbeatTime = time.Now()
 	if rf.state == LEADER || rf.state == CANDIDATE {
 		rf.state = FOLLOWER
 	}
