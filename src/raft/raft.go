@@ -266,10 +266,16 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		Command: command,
 	}
 	rf.log = append(rf.log, entry)
+	index := len(rf.log) - 1
 
-	go syncLog(rf)
+	return index, rf.currentTerm, true // return index, term, isLeader
+}
 
-	return len(rf.log) - 1, rf.currentTerm, true // return index, term, isLeader
+func (rf *Raft)singleRequertVote(peer int, args RequestVoteArgs, reply RequestVoteReply) bool {
+	if rf.sendRequestVote(peer, &args, &reply) && reply.VoteGranted {
+		return true
+	}
+	return false
 }
 
 // start an election
@@ -287,6 +293,7 @@ func (rf *Raft) startElection() bool {
 
 	args := RequestVoteArgs{Term: rf.currentTerm, CandidateId: rf.me, LastLogIndex: lastLogIndex, LastLogTerm: lastLogTerm}
 	reply := RequestVoteReply{}
+	me := rf.me
 	rf.mu.Unlock()
 
 	var voteMutex sync.Mutex
@@ -295,9 +302,9 @@ func (rf *Raft) startElection() bool {
 	numPeer := len(rf.peers)
 	winLimit := numPeer/2 + 1
 	for i := 0; i < numPeer; i++ {
-		if i != rf.me {
-			go func(i int) {
-				if (rf.sendRequestVote(i, &args, &reply)) && reply.VoteGranted {
+		if i != me {
+			go func(peer int) {
+				if rf.singleRequertVote(peer, args, reply) {
 					voteMutex.Lock()
 					pass++
 					voteMutex.Unlock()
@@ -366,7 +373,7 @@ func (rf *Raft) raftRun() {
 
 			heatbeatPassTime += spinPeriod
 			if heatbeatPassTime > heartbeatIntervalPeriod {
-				sendHeartBeat(rf)
+				rf.broadHeartBeat()
 				heatbeatPassTime = 0
 			}
 		} else {
@@ -376,7 +383,7 @@ func (rf *Raft) raftRun() {
 			if time.Now().After(limitTime) { // timeout
 				electionTimeout = timeoutBase + time.Duration(rand.Intn(900))*time.Millisecond
 				if rf.startElection() {
-					sendHeartBeat(rf)
+					rf.broadHeartBeat()
 					heatbeatPassTime = 0
 				}
 			}
@@ -384,10 +391,8 @@ func (rf *Raft) raftRun() {
 	}
 }
 
-func sendHeartBeat(rf *Raft) {
+func (rf *Raft)broadHeartBeat() {
 	rf.mu.Lock()
-	args := RequestAppendArgs{Term: rf.currentTerm}
-	reply := RequestAppendReply{}
 	numPeer := len(rf.peers)
 	me := rf.me
 	rf.mu.Unlock()
@@ -395,12 +400,19 @@ func sendHeartBeat(rf *Raft) {
 	for i := 0; i < numPeer; i++ {
 		if i != me {
 			go func(i int) {
-				rf.sendAppendEntry(i, &args, &reply)
-				// TODO: reply false, and reply term > rf.term -> become follower
-				// 封装把心跳/日志传输写成函数，注意这两者是通过同一套API，心跳不过是日志传输当没有新日志需要sync的情况罢了
+				rf.syncLog(i)
 			}(i)
 		}
 	}
+}
+
+func (rf *Raft)syncLog(peer int) {
+	rf.mu.Lock()
+	args := RequestAppendArgs{Term: rf.currentTerm}
+	reply := RequestAppendReply{}
+	rf.mu.Unlock()
+
+	rf.sendAppendEntry(peer, &args, &reply)
 }
 
 // the tester doesn't halt goroutines created by Raft after each test,
