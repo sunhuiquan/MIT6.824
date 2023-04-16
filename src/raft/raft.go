@@ -164,9 +164,9 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 }
 
+// no need LeaderId field for clients will use Start() on all servers to connect to leader
 type RequestAppendArgs struct {
 	Term         int
-	LeaderId     int
 	PrevLogIndex int
 	PrevLogTerm  int
 	LeaderCommit int
@@ -219,7 +219,6 @@ func syncLog(rf *Raft) {
 	rf.mu.Lock()
 	args := RequestAppendArgs {
 		Term: rf.currentTerm,
-		LeaderId: rf.me,
 		// PrevLogIndex: ,
 		// PrevLogTerm: ,
 		LeaderCommit: rf.commitIndex,
