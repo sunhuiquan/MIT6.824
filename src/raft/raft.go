@@ -138,8 +138,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	DPrintf2("receive RequestVote - node: %v, isLeader: %v, term: %v", rf.me, (rf.state == LEADER), rf.currentTerm)
-
 	reply.Term = rf.currentTerm
 
 	if rf.currentTerm < args.Term {
@@ -154,6 +152,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	if lastLogIndex > 0 {
 		lastLogTerm = rf.log[lastLogIndex - 1].Term
 	}
+
+	DPrintf2("receive RequestVote - node: %v, isLeader: %v, term: %v, args.LastLogIndex: %v, args.LastLogTerm: %v, rf.LastLogIndex: %v, rf.lastLogTerm: %v, commitIndex: %v", rf.me, (rf.state == LEADER), rf.currentTerm, args.LastLogIndex, args.LastLogTerm, lastLogIndex, lastLogTerm, rf.commitIndex)
 
 	if rf.currentTerm > args.Term || rf.votedFor != -1 || lastLogTerm > args.LastLogTerm || ((lastLogTerm == args.LastLogTerm) && lastLogIndex > args.LastLogIndex) { // 确保 leader有着最新的日志
 		reply.VoteGranted = false
@@ -435,6 +435,11 @@ func (rf *Raft)broadHeartBeat() {
 
 func (rf *Raft)syncLog(peer int) {
 	rf.mu.Lock()
+	if rf.state != LEADER { // TODO: move into AppendEntries and test again
+		rf.mu.Unlock()
+		return
+	}
+
 	args := RequestAppendArgs{
 		Term: rf.currentTerm,
 		PrevLogIndex: rf.nextIndex[peer] - 1,
@@ -452,7 +457,7 @@ func (rf *Raft)syncLog(peer int) {
 	if rf.sendAppendEntry(peer, &args, &reply) {
 		rf.mu.Lock()
 		defer rf.mu.Unlock()
-		DPrintf2("sendAppendEntry - node: %v, isLeader: %v, term: %v, peer: %v", rf.me, (rf.state == LEADER), rf.currentTerm, peer)
+		DPrintf2("sendAppendEntry - node: %v, isLeader: %v, term: %v, args.term: %v, peer: %v", rf.me, (rf.state == LEADER), rf.currentTerm, args.Term, peer)
 		DPrintf2("replyAppendEntry - node: %v, isLeader: %v, term: %v, peer: %v, reply.term: %v, reply.Success: %v", rf.me, (rf.state == LEADER), rf.currentTerm, peer, reply.Term, reply.Success)
 
 		if rf.currentTerm != args.Term {
@@ -487,7 +492,7 @@ func (rf *Raft)syncLog(peer int) {
 
 			// rf.log[newCommitIndex - 1].Term == rf.currentTerm is used to limit leader only can commit it's term's log
 			// see this issue on raft paper's topic 5.4.2
-			DPrintf2("node: %v, isLeader: %v, term: %v, peer: %v, newCommitIndex: %v, rf.commitIndex: %v", rf.me, (rf.state == LEADER), rf.currentTerm, peer, newCommitIndex, rf.commitIndex)
+			DPrintf2("node: %v, isLeader: %v, term: %v, peer: %v, newCommitIndex: %v, rf.commitIndex: %v, lastLogIndex: %v", rf.me, (rf.state == LEADER), rf.currentTerm, peer, newCommitIndex, rf.commitIndex, len(rf.log))
 			if newCommitIndex > rf.commitIndex && rf.log[newCommitIndex - 1].Term == rf.currentTerm {
 				rf.commitIndex = newCommitIndex
 			}
