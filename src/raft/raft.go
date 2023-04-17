@@ -16,17 +16,17 @@ package raft
 //   in the same server.
 
 import (
+	"bytes"
 	"math/rand"
+	"os"
 	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"../labgob"
 	"../labrpc"
 )
-
-// import "bytes"
-// import "../labgob"
 
 // as each Raft peer becomes aware that successive log entries are
 // committed, the peer should send an ApplyMsg to the service (or
@@ -96,14 +96,14 @@ func (rf *Raft) GetState() (int, bool) {
 // where it can later be retrieved after a crash and restart.
 // see paper's Figure 2 for a description of what should be persistent.
 func (rf *Raft) persist() {
-	// Your code here (2C).
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// data := w.Bytes()
-	// rf.persister.SaveRaftState(data)
+	// outside must already hold the lock
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.votedFor)
+	e.Encode(rf.log)
+	data := w.Bytes()
+	rf.persister.SaveRaftState(data)
 }
 
 // restore previously persisted state.
@@ -111,19 +111,15 @@ func (rf *Raft) readPersist(data []byte) {
 	if data == nil || len(data) < 1 { // bootstrap without any state?
 		return
 	}
-	// Your code here (2C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
+
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	if d.Decode(&rf.currentTerm) != nil || d.Decode(&rf.votedFor) != nil || d.Decode(&rf.log) != nil {
+	  println("Failed to readPersist().")
+	  os.Exit(-1)
+	}
 }
 
 type RequestVoteArgs struct {
@@ -146,6 +142,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	if rf.currentTerm < args.Term {
 		rf.currentTerm = args.Term
 		rf.votedFor = -1
+		rf.persist()
 	}
 
 	lastLogIndex := len(rf.log)
@@ -160,6 +157,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.votedFor = args.CandidateId
 		rf.lastHeartbeatTime = time.Now()
 		reply.VoteGranted = true
+		rf.persist()
 	}
 }
 
@@ -202,6 +200,9 @@ func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply
 			rf.log = append(rf.log, entry)
 		}
 	}
+	if len(args.Entries) > 0 {
+		rf.persist()
+	}
  
 	if args.LeaderCommit > rf.commitIndex {
 		rf.commitIndex = args.LeaderCommit
@@ -216,6 +217,7 @@ func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply
 	if rf.currentTerm < args.Term {
 		rf.currentTerm = args.Term
 		rf.votedFor = -1
+		rf.persist()
 	}
 	reply.Success = true
 	reply.Term = rf.currentTerm
@@ -264,6 +266,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		Command: command,
 	}
 	rf.log = append(rf.log, entry)
+	rf.persist()
 
 	return len(rf.log), rf.currentTerm, true // return index, term, isLeader
 }
@@ -281,6 +284,7 @@ func (rf *Raft)singleRequertVote(peer int, args RequestVoteArgs, reply RequestVo
 			rf.currentTerm = reply.Term
 			rf.votedFor = -1
 			rf.state = FOLLOWER
+			rf.persist()
 			rf.mu.Unlock()
 			return false
 		}
@@ -297,6 +301,7 @@ func (rf *Raft) startElection() bool {
 	rf.state = CANDIDATE
 	rf.votedFor = rf.me
 	rf.currentTerm++
+	rf.persist()
 
 	lastLogIndex := len(rf.log)
 	lastLogTerm := -1
@@ -346,12 +351,14 @@ func (rf *Raft) startElection() bool {
 				rf.nextIndex[i] = len(rf.log) + 1
 				rf.matchIndex[i] = 0
 			}
+			rf.persist()
 			rf.mu.Unlock()
 			return true
 		} else if currFail >= winLimit || time.Now().After(waitTimeout) {
 			rf.mu.Lock()
 			rf.state = FOLLOWER
 			rf.votedFor = -1
+			rf.persist()
 			rf.mu.Unlock()
 			time.Sleep(time.Duration(rand.Intn(900))*time.Millisecond) // avoid vote split
 			return false
@@ -447,6 +454,7 @@ func (rf *Raft)syncLog(peer int) {
 			rf.state = FOLLOWER
 			rf.currentTerm = reply.Term
 			rf.votedFor = -1
+			rf.persist()
 		}
 
 		if reply.Success {
@@ -530,7 +538,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	}
 
 	// initialize from state persisted before a crash
-	rf.readPersist(persister.ReadRaftState()) // TODO
+	rf.readPersist(persister.ReadRaftState())
 
 	go rf.raftRun()
 	go rf.applyMessage(applyCh)
