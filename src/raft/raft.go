@@ -141,6 +141,7 @@ type RequestVoteReply struct {
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	reply.Term = rf.currentTerm
 
 	if rf.currentTerm < args.Term {
 		rf.currentTerm = args.Term
@@ -469,7 +470,7 @@ func (rf *Raft)syncLog(peer int) {
 
 			// rf.log[newCommitIndex - 1].Term == rf.currentTerm is used to limit leader only can commit it's term's log
 			// see this issue on raft paper's topic 5.4.2
-			DPrintf2("node: %v, isLeader: %v, peer: %v, newCommitIndex: %v, rf.commitIndex: %v", rf.me, (rf.state == LEADER), peer, newCommitIndex, rf.commitIndex)
+			DPrintf2("node: %v, isLeader: %v, term: %v, peer: %v, newCommitIndex: %v, rf.commitIndex: %v", rf.me, (rf.state == LEADER), rf.currentTerm, peer, newCommitIndex, rf.commitIndex)
 			if newCommitIndex > rf.commitIndex && rf.log[newCommitIndex - 1].Term == rf.currentTerm {
 				rf.commitIndex = newCommitIndex
 			}
@@ -546,7 +547,7 @@ func (rf *Raft) applyMessage(applyCh chan ApplyMsg) {
 		var messages = make([]ApplyMsg, 0)
 		for rf.commitIndex > rf.lastApplied {
 			rf.lastApplied += 1
-			DPrintf2("node: %v, isLeader: %v, lastApplied: %v, command: %v", rf.me, rf.state == LEADER, rf.lastApplied, rf.log[rf.lastApplied-1].Command)
+			DPrintf2("node: %v, isLeader: %v, term: %v, lastApplied: %v, command: %v", rf.me, rf.state == LEADER, rf.currentTerm, rf.lastApplied, rf.log[rf.lastApplied-1].Command)
 			messages = append(messages, ApplyMsg{
 				CommandValid: true,
 				Command:      rf.log[rf.lastApplied-1].Command,
