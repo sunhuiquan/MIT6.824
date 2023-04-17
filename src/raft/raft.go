@@ -137,9 +137,13 @@ type RequestVoteReply struct {
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
+	DPrintf2("receive RequestVote - node: %v, isLeader: %v, term: %v", rf.me, (rf.state == LEADER), rf.currentTerm)
+
 	reply.Term = rf.currentTerm
 
 	if rf.currentTerm < args.Term {
+		rf.state = FOLLOWER
 		rf.currentTerm = args.Term
 		rf.votedFor = -1
 		rf.persist()
@@ -312,6 +316,8 @@ func (rf *Raft) startElection() bool {
 	args := RequestVoteArgs{Term: rf.currentTerm, CandidateId: rf.me, LastLogIndex: lastLogIndex, LastLogTerm: lastLogTerm}
 	reply := RequestVoteReply{}
 	me := rf.me
+
+	DPrintf2("request vote - node: %v, term: %v", rf.me, rf.currentTerm)
 	rf.mu.Unlock()
 
 	var voteMutex sync.Mutex
@@ -352,6 +358,7 @@ func (rf *Raft) startElection() bool {
 				rf.matchIndex[i] = 0
 			}
 			rf.persist()
+			DPrintf2("become leader - node: %v, term: %v", rf.me, rf.currentTerm)
 			rf.mu.Unlock()
 			return true
 		} else if currFail >= winLimit || time.Now().After(waitTimeout) {
@@ -445,6 +452,8 @@ func (rf *Raft)syncLog(peer int) {
 	if rf.sendAppendEntry(peer, &args, &reply) {
 		rf.mu.Lock()
 		defer rf.mu.Unlock()
+		DPrintf2("sendAppendEntry - node: %v, isLeader: %v, term: %v, peer: %v", rf.me, (rf.state == LEADER), rf.currentTerm, peer)
+		DPrintf2("replyAppendEntry - node: %v, isLeader: %v, term: %v, peer: %v, reply.term: %v, reply.Success: %v", rf.me, (rf.state == LEADER), rf.currentTerm, peer, reply.Term, reply.Success)
 
 		if rf.currentTerm != args.Term {
 			return
