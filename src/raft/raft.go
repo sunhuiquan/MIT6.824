@@ -215,10 +215,8 @@ func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply
 		}
 	}
 
-	if rf.state == LEADER || rf.state == CANDIDATE {
-		rf.state = FOLLOWER
-	}
 	if rf.currentTerm < args.Term {
+		rf.state = FOLLOWER
 		rf.currentTerm = args.Term
 		rf.votedFor = -1
 		rf.persist()
