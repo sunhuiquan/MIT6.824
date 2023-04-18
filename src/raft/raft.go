@@ -57,8 +57,8 @@ const (
 )
 
 // tester requires that the leader send heartbeat RPCs no more than ten times per second.
-const timeoutBase = 900 * time.Millisecond
-const heartbeatIntervalPeriod = 150 * time.Millisecond
+const timeoutBase = 200 * time.Millisecond
+const heartbeatIntervalPeriod = 100 * time.Millisecond
 const spinPeriod = 10 * time.Millisecond
 
 type Raft struct {
@@ -302,6 +302,7 @@ func (rf *Raft)singleRequertVote(peer int, args RequestVoteArgs, reply RequestVo
 // start an election
 func (rf *Raft) startElection() bool {
 	rf.mu.Lock()
+	rf.lastHeartbeatTime = time.Now()
 	rf.state = CANDIDATE
 	rf.votedFor = rf.me
 	rf.currentTerm++
@@ -341,8 +342,6 @@ func (rf *Raft) startElection() bool {
 		}
 	}
 
-	waitStart := time.Now()
-	waitTimeout := waitStart.Add(timeoutBase)
 	for {
 		voteMutex.Lock()
 		currPass := pass
@@ -361,13 +360,12 @@ func (rf *Raft) startElection() bool {
 			DPrintf2("become leader - node: %v, term: %v", rf.me, rf.currentTerm)
 			rf.mu.Unlock()
 			return true
-		} else if currFail >= winLimit || time.Now().After(waitTimeout) {
+		} else if currFail >= winLimit {
 			rf.mu.Lock()
 			rf.state = FOLLOWER
 			rf.votedFor = -1
 			rf.persist()
 			rf.mu.Unlock()
-			time.Sleep(time.Duration(rand.Intn(900))*time.Millisecond) // avoid vote split
 			return false
 		}
 		time.Sleep(spinPeriod)
@@ -384,7 +382,7 @@ func (rf *Raft) raftRun() {
 	rf.lastHeartbeatTime = time.Now() // init it before first leader is elected
 	rf.mu.Unlock()
 	rand.Seed(rand.Int63())
-	electionTimeout := timeoutBase + time.Duration(rand.Intn(900))*time.Millisecond
+	electionTimeout := timeoutBase + time.Duration(rand.Intn(150))*time.Millisecond
 	heatbeatPassTime := 0*time.Millisecond
 
 	for {
@@ -408,7 +406,7 @@ func (rf *Raft) raftRun() {
 			rf.mu.Unlock()
 
 			if time.Now().After(limitTime) { // timeout
-				electionTimeout = timeoutBase + time.Duration(rand.Intn(900))*time.Millisecond
+				electionTimeout = timeoutBase + time.Duration(rand.Intn(150))*time.Millisecond
 				if rf.startElection() {
 					rf.broadHeartBeat()
 					heatbeatPassTime = 0
@@ -579,6 +577,10 @@ func (rf *Raft) applyMessage(applyCh chan ApplyMsg) {
 		rf.mu.Unlock()
 
 		for _, msg := range messages {
+			rf.mu.Lock()
+			DPrintf2("applyCh <- msg node: %v, term: %v, lastApplied: %v, command: %v", rf.me, rf.currentTerm, rf.lastApplied, rf.log[rf.lastApplied-1].Command)
+			rf.mu.Unlock()
+
 			applyCh <- msg
 		}
 	}
