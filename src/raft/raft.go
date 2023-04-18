@@ -189,11 +189,11 @@ func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply
 		return
 	}
 
+	rf.lastHeartbeatTime = time.Now()
+
 	if args.PrevLogIndex > 0 && (args.PrevLogIndex - 1 >= len(rf.log) || rf.log[args.PrevLogIndex - 1].Term != args.PrevLogTerm) {
 		return
 	}
-
-	rf.lastHeartbeatTime = time.Now()
 
 	for i, entry := range args.Entries {
 		index := args.PrevLogIndex + i
@@ -269,6 +269,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.log = append(rf.log, entry)
 	rf.persist()
 
+	DPrintf2("Start add command - node: %v, command: %v", rf.me, command)
 	return len(rf.log), rf.currentTerm, true // return index, term, isLeader
 }
 
@@ -411,26 +412,17 @@ func (rf *Raft) raftRun() {
 
 func (rf *Raft)broadHeartBeat() {
 	rf.mu.Lock()
-	numPeer := len(rf.peers)
-	me := rf.me
-	rf.mu.Unlock()
+	defer rf.mu.Unlock()
 
+	numPeer := len(rf.peers)
 	for i := 0; i < numPeer; i++ {
-		if i != me {
-			go func(i int) {
-				rf.syncLog(i)
-			}(i)
+		if i != rf.me {
+			rf.syncLog(i)
 		}
 	}
 }
 
 func (rf *Raft)syncLog(peer int) {
-	rf.mu.Lock()
-	if rf.state != LEADER { // TODO: move into AppendEntries and test again
-		rf.mu.Unlock()
-		return
-	}
-
 	args := RequestAppendArgs{
 		Term: rf.currentTerm,
 		PrevLogIndex: rf.nextIndex[peer] - 1,
@@ -442,58 +434,60 @@ func (rf *Raft)syncLog(peer int) {
 		args.PrevLogTerm = rf.log[args.PrevLogIndex - 1].Term
 	}
 
-	reply := RequestAppendReply{}
-	rf.mu.Unlock()
+	go func() {
+		reply := RequestAppendReply{}
+		if rf.sendAppendEntry(peer, &args, &reply) {
+			rf.mu.Lock()
+			defer rf.mu.Unlock()
 
-	if rf.sendAppendEntry(peer, &args, &reply) {
-		rf.mu.Lock()
-		defer rf.mu.Unlock()
-		DPrintf2("sendAppendEntry - node: %v, isLeader: %v, term: %v, args.term: %v, peer: %v", rf.me, (rf.state == LEADER), rf.currentTerm, args.Term, peer)
-		DPrintf2("replyAppendEntry - node: %v, isLeader: %v, term: %v, peer: %v, reply.term: %v, reply.Success: %v", rf.me, (rf.state == LEADER), rf.currentTerm, peer, reply.Term, reply.Success)
+			DPrintf2("sendAppendEntry - node: %v, isLeader: %v, term: %v, args.term: %v, peer: %v", rf.me, (rf.state == LEADER), rf.currentTerm, args.Term, peer)
+			DPrintf2("replyAppendEntry - node: %v, isLeader: %v, term: %v, peer: %v, reply.term: %v, reply.Success: %v", rf.me, (rf.state == LEADER), rf.currentTerm, peer, reply.Term, reply.Success)
 
-		if rf.currentTerm != args.Term {
-			return
-		}
+			if rf.currentTerm != args.Term {
+				return
+			}
 
-		if reply.Term > rf.currentTerm {
-			rf.state = FOLLOWER
-			rf.currentTerm = reply.Term
-			rf.votedFor = -1
-			rf.persist()
-		}
+			if reply.Term > rf.currentTerm {
+				rf.state = FOLLOWER
+				rf.currentTerm = reply.Term
+				rf.votedFor = -1
+				rf.persist()
+				return
+			}
 
-		if reply.Success {
-			rf.nextIndex[peer] += len(args.Entries)
-			rf.matchIndex[peer] = rf.nextIndex[peer] - 1
-			DPrintf1("node: %v, isLeader: %v, peer: %v, nextIndex: %v, matchIndex: %v", rf.me, (rf.state == LEADER),
-			peer, rf.nextIndex[peer], rf.matchIndex[peer])
+			if reply.Success {
+				rf.nextIndex[peer] += len(args.Entries)
+				rf.matchIndex[peer] = rf.nextIndex[peer] - 1
+				DPrintf1("node: %v, isLeader: %v, peer: %v, nextIndex: %v, matchIndex: %v", rf.me, (rf.state == LEADER),
+				peer, rf.nextIndex[peer], rf.matchIndex[peer])
 
-			matchIndexes := make([]int, 0)
-			for i := 0; i < len(rf.peers); i++ {
-				if i == rf.me { // leader won't set it's own matchIndex and nextIndex
-				matchIndexes = append(matchIndexes, len(rf.log))
-				} else {
-					matchIndexes = append(matchIndexes, rf.matchIndex[i])
+				matchIndexes := make([]int, 0)
+				for i := 0; i < len(rf.peers); i++ {
+					if i == rf.me { // leader won't set it's own matchIndex and nextIndex
+					matchIndexes = append(matchIndexes, len(rf.log))
+					} else {
+						matchIndexes = append(matchIndexes, rf.matchIndex[i])
+					}
+				}
+				sort.Ints(matchIndexes)
+				newCommitIndex := matchIndexes[len(rf.peers) / 2]
+				DPrintf1("node: %v, isLeader: %v, peer: %v, newCommitIndex: %v", rf.me, (rf.state == LEADER),
+				peer, newCommitIndex)
+
+				// rf.log[newCommitIndex - 1].Term == rf.currentTerm is used to limit leader only can commit it's term's log
+				// see this issue on raft paper's topic 5.4.2
+				DPrintf2("node: %v, isLeader: %v, term: %v, peer: %v, newCommitIndex: %v, rf.commitIndex: %v, lastLogIndex: %v", rf.me, (rf.state == LEADER), rf.currentTerm, peer, newCommitIndex, rf.commitIndex, len(rf.log))
+				if newCommitIndex > rf.commitIndex && rf.log[newCommitIndex - 1].Term == rf.currentTerm {
+					rf.commitIndex = newCommitIndex
+				}
+			} else {
+				rf.nextIndex[peer] -= 1
+				if rf.nextIndex[peer] < 1 {
+					rf.nextIndex[peer] = 1
 				}
 			}
-			sort.Ints(matchIndexes)
-			newCommitIndex := matchIndexes[len(rf.peers) / 2]
-			DPrintf1("node: %v, isLeader: %v, peer: %v, newCommitIndex: %v", rf.me, (rf.state == LEADER),
-			peer, newCommitIndex)
-
-			// rf.log[newCommitIndex - 1].Term == rf.currentTerm is used to limit leader only can commit it's term's log
-			// see this issue on raft paper's topic 5.4.2
-			DPrintf2("node: %v, isLeader: %v, term: %v, peer: %v, newCommitIndex: %v, rf.commitIndex: %v, lastLogIndex: %v", rf.me, (rf.state == LEADER), rf.currentTerm, peer, newCommitIndex, rf.commitIndex, len(rf.log))
-			if newCommitIndex > rf.commitIndex && rf.log[newCommitIndex - 1].Term == rf.currentTerm {
-				rf.commitIndex = newCommitIndex
-			}
-		} else {
-			rf.nextIndex[peer] -= 1
-			if rf.nextIndex[peer] < 1 {
-				rf.nextIndex[peer] = 1
-			}
 		}
-	}
+	}()
 }
 
 // the tester doesn't halt goroutines created by Raft after each test,
@@ -570,10 +564,6 @@ func (rf *Raft) applyMessage(applyCh chan ApplyMsg) {
 		rf.mu.Unlock()
 
 		for _, msg := range messages {
-			rf.mu.Lock()
-			DPrintf2("applyCh <- msg node: %v, term: %v, lastApplied: %v, command: %v", rf.me, rf.currentTerm, rf.lastApplied, rf.log[rf.lastApplied-1].Command)
-			rf.mu.Unlock()
-
 			applyCh <- msg
 		}
 	}
