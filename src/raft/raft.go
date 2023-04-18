@@ -222,7 +222,6 @@ func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply
 		rf.persist()
 	}
 	reply.Success = true
-	reply.Term = rf.currentTerm
 }
 
 // The labrpc package simulates a lossy network, in which servers
