@@ -189,11 +189,11 @@ func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply
 		return
 	}
 
-	rf.lastHeartbeatTime = time.Now()
-
 	if args.PrevLogIndex > 0 && (args.PrevLogIndex - 1 >= len(rf.log) || rf.log[args.PrevLogIndex - 1].Term != args.PrevLogTerm) {
 		return
 	}
+
+	rf.lastHeartbeatTime = time.Now()
 
 	for i, entry := range args.Entries {
 		index := args.PrevLogIndex + i
@@ -348,20 +348,16 @@ func (rf *Raft) startElection() bool {
 		if currPass >= winLimit {
 			rf.mu.Lock()
 			rf.state = LEADER
-			rf.votedFor = -1
 			for i := 0; i < len(rf.peers); i++ {
 				rf.nextIndex[i] = len(rf.log) + 1
 				rf.matchIndex[i] = 0
 			}
-			rf.persist()
 			DPrintf2("become leader - node: %v, term: %v", rf.me, rf.currentTerm)
 			rf.mu.Unlock()
 			return true
 		} else if currFail >= winLimit {
 			rf.mu.Lock()
 			rf.state = FOLLOWER
-			rf.votedFor = -1
-			rf.persist()
 			rf.mu.Unlock()
 			return false
 		}
