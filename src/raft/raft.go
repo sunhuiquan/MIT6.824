@@ -353,7 +353,7 @@ func (rf *Raft) startElection() bool {
 				rf.nextIndex[i] = len(rf.log) + 1
 				rf.matchIndex[i] = 0
 			}
-			DPrintf2("become leader - node: %v, term: %v", rf.me, rf.currentTerm)
+			DPrintf2("become leader - node: %v, term: %v \n\n", rf.me, rf.currentTerm)
 			rf.mu.Unlock()
 			return true
 		} else if currFail >= winLimit {
@@ -441,7 +441,9 @@ func (rf *Raft)syncLog(peer int) {
 			defer rf.mu.Unlock()
 
 			DPrintf2("sendAppendEntry - node: %v, isLeader: %v, term: %v, args.term: %v, peer: %v", rf.me, (rf.state == LEADER), rf.currentTerm, args.Term, peer)
-			DPrintf2("replyAppendEntry - node: %v, isLeader: %v, term: %v, peer: %v, reply.term: %v, reply.Success: %v", rf.me, (rf.state == LEADER), rf.currentTerm, peer, reply.Term, reply.Success)
+			if !reply.Success {
+				DPrintf2("replyAppendEntry - node: %v, isLeader: %v, term: %v, peer: %v, reply.term: %v, reply.Success: %v\n\n", rf.me, (rf.state == LEADER), rf.currentTerm, peer, reply.Term, reply.Success)
+			}
 
 			if rf.currentTerm != args.Term {
 				return
@@ -471,12 +473,9 @@ func (rf *Raft)syncLog(peer int) {
 				}
 				sort.Ints(matchIndexes)
 				newCommitIndex := matchIndexes[len(rf.peers) / 2]
-				DPrintf1("node: %v, isLeader: %v, peer: %v, newCommitIndex: %v", rf.me, (rf.state == LEADER),
-				peer, newCommitIndex)
-
 				// rf.log[newCommitIndex - 1].Term == rf.currentTerm is used to limit leader only can commit it's term's log
 				// see this issue on raft paper's topic 5.4.2
-				DPrintf2("node: %v, isLeader: %v, term: %v, peer: %v, newCommitIndex: %v, rf.commitIndex: %v, lastLogIndex: %v", rf.me, (rf.state == LEADER), rf.currentTerm, peer, newCommitIndex, rf.commitIndex, len(rf.log))
+				DPrintf2("replyAppendEntry - node: %v, isLeader: %v, term: %v, peer: %v, reply.term: %v, reply.Success: %v, newCommitIndex: %v, rf.commitIndex: %v, lastLogIndex: %v\n\n", rf.me, (rf.state == LEADER), rf.currentTerm, peer, reply.Term, reply.Success, newCommitIndex, rf.commitIndex, len(rf.log))
 				if newCommitIndex > rf.commitIndex && rf.log[newCommitIndex - 1].Term == rf.currentTerm {
 					rf.commitIndex = newCommitIndex
 				}
