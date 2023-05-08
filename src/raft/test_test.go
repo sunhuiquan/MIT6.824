@@ -11,6 +11,8 @@ package raft
 import (
 	"fmt"
 	"math/rand"
+	"os"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1018,5 +1020,74 @@ func TestEasyElectionCase(t *testing.T) {
 	cfg.connect(leader2)
 	cfg.checkOneLeader()
 
+	cfg.end()
+}
+
+func TestInteract(t *testing.T) {
+    ttyName := "/dev/tty"
+	if runtime.GOOS != "linux" {
+		t.Fatal("只支持linux系统")
+	}
+
+	// 为了在 go test 中使用命令行交互而修改标准输入映射
+    f, err := os.Open(ttyName)
+    if err != nil {
+        t.Fatal(err)
+    }
+    defer f.Close()
+
+    oldStdin := os.Stdin
+    defer func() { os.Stdin = oldStdin }()
+    os.Stdin = f
+
+	fmt.Println("输入集群中的节点数(输入3或5):")
+	var numServer int
+	_, err = fmt.Scan(&numServer)
+	if err != nil {
+		t.Fatal(err)
+	} else if numServer != 3 && numServer != 5 {
+		t.Fatal("该交互测试为了日志清晰只允许集群中有3或5个节点")
+	}
+	cfg := make_config(t, numServer, false)
+	defer cfg.cleanup()
+
+	// TODO 不要下线关机同时启用，不支持
+
+	var (
+		command string
+		// nodeNo int
+		// content string
+	)
+
+	info :=
+	"=============================================\n" +
+	"上线(联网)节点: <connect> <nodeNo>\n" +
+	"下线(断网)节点: <disconnect> <nodeNo>\n" +              // 下线模拟网络问题，进程仍在运行
+	"开启(开机)节点: <open> <nodeNo>\n" +
+	"关闭(关机)节点: <close> <nodeNo>\n" +                   // 关机模拟机器故障，这种会丢内存数据
+	"输入命令(字符串模拟内容): <command> <content>\n" +
+	"退出: <quit>\n" +
+	"============================================="
+
+	for true {
+		fmt.Println(info)
+
+		_, err = fmt.Scan(&command)
+		if command == "connect" {
+
+		} else if command == "disconnect" {
+
+		} else if command == "open" {
+
+		} else if command == "close" {
+
+		} else if command == "command" {
+
+		} else if command == "quit" {
+			break
+		} else {
+			fmt.Println("无效的输入格式")
+		}
+	}
 	cfg.end()
 }
