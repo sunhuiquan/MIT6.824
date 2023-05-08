@@ -1030,7 +1030,7 @@ func scanNodeNo(t *testing.T, ptrNodeNo *int, numServer int) bool {
 		return false
 	}
 
-	if *ptrNodeNo > 0 && *ptrNodeNo < numServer {
+	if *ptrNodeNo >= 0 && *ptrNodeNo < numServer {
 		return true
 	}
 	fmt.Println("无效的节点号")
@@ -1084,7 +1084,7 @@ func TestInteract(t *testing.T) {
 		content string
 	)
 
-	info :=
+	const info =
 	"=============================================\n" +
 	"上线(联网)节点: <connect> <nodeNo>\n" +
 	"下线(断网)节点: <disconnect> <nodeNo>\n" +              // 下线模拟网络问题，进程仍在运行
@@ -1093,6 +1093,7 @@ func TestInteract(t *testing.T) {
 	"输入命令(字符串模拟内容): <command> <content>\n" +
 	"退出: <quit>\n" +
 	"============================================="
+	fmt.Println(info)
 
 	nodeStates := make([]NodeState, numServer) // 记录节点状态
 	for i := 0; i < numServer; i++ {
@@ -1102,8 +1103,6 @@ func TestInteract(t *testing.T) {
 	numHalf := numServer / 2 + 1
 
 	for true {
-		fmt.Println(info)
-
 		_, err = fmt.Scan(&command)
 		if err != nil {
 			t.Fatal(err)
@@ -1115,6 +1114,8 @@ func TestInteract(t *testing.T) {
 			} else {
 				fmt.Printf("节点 %v 上线\n", nodeNo)
 				cfg.connect(nodeNo)
+				nodeStates[nodeNo] = RUNNING
+				numAlive++
 			}
 		} else if command == "disconnect" && scanNodeNo(t, &nodeNo, numServer) {
 			if nodeStates[nodeNo] != RUNNING {
@@ -1122,6 +1123,8 @@ func TestInteract(t *testing.T) {
 			} else {
 				fmt.Printf("节点 %v 下线\n", nodeNo)
 				cfg.disconnect(nodeNo)
+				nodeStates[nodeNo] = DISCONNECT
+				numAlive--
 			}
 		} else if command == "open" && scanNodeNo(t, &nodeNo, numServer) {
 			if nodeStates[nodeNo] != CLOSE {
@@ -1129,6 +1132,8 @@ func TestInteract(t *testing.T) {
 			} else {
 				fmt.Printf("节点 %v 重启\n", nodeNo)
 				cfg.start1(nodeNo)
+				nodeStates[nodeNo] = RUNNING
+				numAlive++
 			}
 		} else if command == "close" && scanNodeNo(t, &nodeNo, numServer) {
 			if nodeStates[nodeNo] != RUNNING {
@@ -1136,6 +1141,8 @@ func TestInteract(t *testing.T) {
 			} else {
 				fmt.Printf("节点 %v 宕机\n", nodeNo)
 				cfg.crash1(nodeNo)
+				nodeStates[nodeNo] = CLOSE
+				numAlive--
 			}
 		} else if command == "command" {
 			_, err := fmt.Scan(&content)
@@ -1147,11 +1154,11 @@ func TestInteract(t *testing.T) {
 			if numAlive < numHalf {
 				fmt.Println("正常运行节点未过半时无法完成日志提交")
 			} else {
-				cfg.one(content, 1, true) // 这里是测试日志提交的函数，如果提交不了会报错，所以这里直接保证过半节点存活
+				cfg.one(content, numAlive, true) // 这里是测试日志提交的函数，如果提交不了会报错，所以这里直接保证过半节点存活
 			}
 		} else if command == "quit" {
 			break
-		} else {
+		} else if command != "connect" && command != "disconnect" && command != "open" && command != "close"{
 			fmt.Println("无效的输入格式")
 		}
 	}
