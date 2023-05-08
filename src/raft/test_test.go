@@ -976,3 +976,47 @@ func TestReliableChurn2C(t *testing.T) {
 func TestUnreliableChurn2C(t *testing.T) {
 	internalChurn(t, true)
 }
+
+func TestEasyElectionCase(t *testing.T) {
+	fmt.Printf("\n===== 创建一个有三个节点的 Raft 集群 =====\n")
+	servers := 3
+	cfg := make_config(t, servers, false)
+	defer cfg.cleanup()
+
+	cfg.begin("\n===== 测试网络错误连接失败是否能正常选举(网络分区故障下的 Leader 选举) =====\n")
+
+	leader1 := cfg.checkOneLeader()
+	fmt.Printf("\n===== 三个节点正常启动, 正常选举出 Leader, 节点是: %v =====\n", leader1)
+
+	cfg.disconnect(leader1)
+	fmt.Printf("\n===== 使 Leader 节点 %v 下线", leader1)
+
+	fmt.Printf("\n===== Leader节点断开连接, 开始选举下一任期的 Leader =====\n")
+	cfg.checkOneLeader()
+
+	fmt.Printf("\n===== 恢复之前断开连接的 Leader 节点 %v =====\n", leader1)
+	cfg.connect(leader1)
+	leader2 := cfg.checkOneLeader()
+
+	cfg.disconnect(leader2)
+	fmt.Printf("\n===== 断开当前任期的 Leader 节点 %v =====\n", leader2)
+	
+	cfg.disconnect((leader2 + 1) % servers)
+	fmt.Printf("\n===== 断开另一个节点 %v =====\n", (leader2 + 1) % servers)
+
+	fmt.Printf("\n===== 3个节点中的2个都断开连接，此时无法选举出新的节点 =====\n")
+	fmt.Printf("\n===== 注意这里的节点是产生了断开连接，意思是断开连接的节点成为一个独立的网络分区，不是宕机，所以仍然能 request vote 只不过发不过去 =====\n")
+	time.Sleep(10 * RaftElectionTimeout)
+	cfg.checkNoLeader()
+
+	fmt.Printf("\n===== 恢复节点 %v，可以开始新的选举 =====\n", (leader2 + 1) % servers)
+	cfg.connect((leader2 + 1) % servers)
+	leader3 := cfg.checkOneLeader()
+	fmt.Printf("\n===== 新任期选举成功: %v =====\n", leader3)
+
+	fmt.Printf("\n===== 恢复节点 %v，不影响当前 Leader =====\n", leader2)
+	cfg.connect(leader2)
+	cfg.checkOneLeader()
+
+	cfg.end()
+}
