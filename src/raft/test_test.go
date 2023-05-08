@@ -1023,6 +1023,27 @@ func TestEasyElectionCase(t *testing.T) {
 	cfg.end()
 }
 
+func scanNodeNo(t *testing.T, ptrNodeNo *int, numServer int) bool {
+	_, err := fmt.Scan(ptrNodeNo)
+	if err != nil {
+		fmt.Println("无效的输入格式")
+		return false
+	}
+
+	if *ptrNodeNo > 0 && *ptrNodeNo < numServer {
+		return true
+	}
+	fmt.Println("无效的节点号")
+	return false
+}
+
+type NodeState int
+const (
+	RUNNING NodeState = iota
+	DISCONNECT
+	CLOSE
+)
+
 func TestInteract(t *testing.T) {
     ttyName := "/dev/tty"
 	if runtime.GOOS != "linux" {
@@ -1057,38 +1078,77 @@ func TestInteract(t *testing.T) {
 	cfg := make_config(t, numServer, false)
 	defer cfg.cleanup()
 
-	// TODO 不要下线关机同时启用，不支持
-
 	var (
 		command string
-		// nodeNo int
-		// content string
+		nodeNo int
+		content string
 	)
 
 	info :=
 	"=============================================\n" +
 	"上线(联网)节点: <connect> <nodeNo>\n" +
 	"下线(断网)节点: <disconnect> <nodeNo>\n" +              // 下线模拟网络问题，进程仍在运行
-	"开启(开机)节点: <open> <nodeNo>\n" +
-	"关闭(关机)节点: <close> <nodeNo>\n" +                   // 关机模拟机器故障，这种会丢内存数据
+	"重启(开机)节点: <open> <nodeNo>\n" +
+	"宕机(关机)节点: <close> <nodeNo>\n" +                   // 宕机模拟机器故障，如断电，进程崩溃，这种会丢内存数据
 	"输入命令(字符串模拟内容): <command> <content>\n" +
 	"退出: <quit>\n" +
 	"============================================="
+
+	nodeStates := make([]NodeState, numServer) // 记录节点状态
+	for i := 0; i < numServer; i++ {
+		nodeStates[i] = RUNNING
+	}
+	numAlive := numServer
+	numHalf := numServer / 2 + 1
 
 	for true {
 		fmt.Println(info)
 
 		_, err = fmt.Scan(&command)
-		if command == "connect" {
+		if err != nil {
+			t.Fatal(err)
+		}
 
-		} else if command == "disconnect" {
-
-		} else if command == "open" {
-
-		} else if command == "close" {
-
+		if command == "connect" && scanNodeNo(t, &nodeNo, numServer) {
+			if nodeStates[nodeNo] != DISCONNECT {
+				fmt.Printf("节点 %v 未处于下线状态\n", nodeNo)
+			} else {
+				fmt.Printf("节点 %v 上线\n", nodeNo)
+				cfg.connect(nodeNo)
+			}
+		} else if command == "disconnect" && scanNodeNo(t, &nodeNo, numServer) {
+			if nodeStates[nodeNo] != RUNNING {
+				fmt.Println("只支持正常运行的节点下线")
+			} else {
+				fmt.Printf("节点 %v 下线\n", nodeNo)
+				cfg.disconnect(nodeNo)
+			}
+		} else if command == "open" && scanNodeNo(t, &nodeNo, numServer) {
+			if nodeStates[nodeNo] != CLOSE {
+				fmt.Printf("节点 %v 未处于宕机状态\n", nodeNo)
+			} else {
+				fmt.Printf("节点 %v 重启\n", nodeNo)
+				cfg.start1(nodeNo)
+			}
+		} else if command == "close" && scanNodeNo(t, &nodeNo, numServer) {
+			if nodeStates[nodeNo] != RUNNING {
+				fmt.Println("只支持正常运行的节点宕机")
+			} else {
+				fmt.Printf("节点 %v 宕机\n", nodeNo)
+				cfg.crash1(nodeNo)
+			}
 		} else if command == "command" {
+			_, err := fmt.Scan(&content)
+			if err != nil {
+				fmt.Println("无效的输入格式")
+				continue
+			}
 
+			if numAlive < numHalf {
+				fmt.Println("正常运行节点未过半时无法完成日志提交")
+			} else {
+				cfg.one(content, 1, true) // 这里是测试日志提交的函数，如果提交不了会报错，所以这里直接保证过半节点存活
+			}
 		} else if command == "quit" {
 			break
 		} else {
