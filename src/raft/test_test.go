@@ -1040,6 +1040,12 @@ func TestInteract(t *testing.T) {
     defer func() { os.Stdin = oldStdin }()
     os.Stdin = f
 
+	file, err := os.OpenFile("./raft.log", os.O_CREATE | os.O_TRUNC, 0644) // 重新创建 log 文件
+	if err != nil {
+		t.Fatal(err)
+	}
+	file.Close()
+
 	fmt.Println("输入集群中的节点数(输入3或5):")
 	var numServer int
 	_, err = fmt.Scan(&numServer)

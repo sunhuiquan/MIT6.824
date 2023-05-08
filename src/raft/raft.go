@@ -153,7 +153,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		lastLogTerm = rf.log[lastLogIndex - 1].Term
 	}
 
-	DPrintf2("receive RequestVote - node: %v, isLeader: %v, term: %v, args.LastLogIndex: %v, args.LastLogTerm: %v, rf.LastLogIndex: %v, rf.lastLogTerm: %v, commitIndex: %v", rf.me, (rf.state == LEADER), rf.currentTerm, args.LastLogIndex, args.LastLogTerm, lastLogIndex, lastLogTerm, rf.commitIndex)
+	LogInfo("receive RequestVote - node: %v, isLeader: %v, term: %v, args.LastLogIndex: %v, args.LastLogTerm: %v, rf.LastLogIndex: %v, rf.lastLogTerm: %v, commitIndex: %v", rf.me, (rf.state == LEADER), rf.currentTerm, args.LastLogIndex, args.LastLogTerm, lastLogIndex, lastLogTerm, rf.commitIndex)
 
 	if rf.currentTerm > args.Term || rf.votedFor != -1 || lastLogTerm > args.LastLogTerm || ((lastLogTerm == args.LastLogTerm) && lastLogIndex > args.LastLogIndex) { // 确保 leader有着最新的日志
 		reply.VoteGranted = false
@@ -269,7 +269,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.log = append(rf.log, entry)
 	rf.persist()
 
-	DPrintf2("Start add command - node: %v, command: %v", rf.me, command)
+	LogInfo("Start add command - node: %v, command: %v", rf.me, command)
 	return len(rf.log), rf.currentTerm, true // return index, term, isLeader
 }
 
@@ -316,7 +316,7 @@ func (rf *Raft) startElection() bool {
 	reply := RequestVoteReply{}
 	me := rf.me
 
-	DPrintf2("request vote - node: %v, term: %v", rf.me, rf.currentTerm)
+	LogInfo("request vote - node: %v, term: %v", rf.me, rf.currentTerm)
 	rf.mu.Unlock()
 
 	var voteMutex sync.Mutex
@@ -353,7 +353,7 @@ func (rf *Raft) startElection() bool {
 				rf.nextIndex[i] = len(rf.log) + 1
 				rf.matchIndex[i] = 0
 			}
-			DPrintf2("become leader - node: %v, term: %v \n\n", rf.me, rf.currentTerm)
+			LogInfo("become leader - node: %v, term: %v \n\n", rf.me, rf.currentTerm)
 			rf.mu.Unlock()
 			return true
 		} else if currFail >= winLimit {
@@ -440,9 +440,9 @@ func (rf *Raft)syncLog(peer int) {
 			rf.mu.Lock()
 			defer rf.mu.Unlock()
 
-			DPrintf2("sendAppendEntry - node: %v, isLeader: %v, term: %v, args.term: %v, peer: %v", rf.me, (rf.state == LEADER), rf.currentTerm, args.Term, peer)
+			LogInfo("sendAppendEntry - node: %v, isLeader: %v, term: %v, args.term: %v, peer: %v", rf.me, (rf.state == LEADER), rf.currentTerm, args.Term, peer)
 			if !reply.Success {
-				DPrintf2("replyAppendEntry - node: %v, isLeader: %v, term: %v, peer: %v, reply.term: %v, reply.Success: %v\n\n", rf.me, (rf.state == LEADER), rf.currentTerm, peer, reply.Term, reply.Success)
+				LogInfo("replyAppendEntry - node: %v, isLeader: %v, term: %v, peer: %v, reply.term: %v, reply.Success: %v\n\n", rf.me, (rf.state == LEADER), rf.currentTerm, peer, reply.Term, reply.Success)
 			}
 
 			if rf.currentTerm != args.Term {
@@ -460,7 +460,7 @@ func (rf *Raft)syncLog(peer int) {
 			if reply.Success {
 				rf.nextIndex[peer] += len(args.Entries)
 				rf.matchIndex[peer] = rf.nextIndex[peer] - 1
-				DPrintf1("node: %v, isLeader: %v, peer: %v, nextIndex: %v, matchIndex: %v", rf.me, (rf.state == LEADER),
+				LogInfo("node: %v, isLeader: %v, peer: %v, nextIndex: %v, matchIndex: %v", rf.me, (rf.state == LEADER),
 				peer, rf.nextIndex[peer], rf.matchIndex[peer])
 
 				matchIndexes := make([]int, 0)
@@ -475,7 +475,7 @@ func (rf *Raft)syncLog(peer int) {
 				newCommitIndex := matchIndexes[len(rf.peers) / 2]
 				// rf.log[newCommitIndex - 1].Term == rf.currentTerm is used to limit leader only can commit it's term's log
 				// see this issue on raft paper's topic 5.4.2
-				DPrintf2("replyAppendEntry - node: %v, isLeader: %v, term: %v, peer: %v, reply.term: %v, reply.Success: %v, newCommitIndex: %v, rf.commitIndex: %v, lastLogIndex: %v\n\n", rf.me, (rf.state == LEADER), rf.currentTerm, peer, reply.Term, reply.Success, newCommitIndex, rf.commitIndex, len(rf.log))
+				LogInfo("replyAppendEntry - node: %v, isLeader: %v, term: %v, peer: %v, reply.term: %v, reply.Success: %v, newCommitIndex: %v, rf.commitIndex: %v, lastLogIndex: %v\n\n", rf.me, (rf.state == LEADER), rf.currentTerm, peer, reply.Term, reply.Success, newCommitIndex, rf.commitIndex, len(rf.log))
 				if newCommitIndex > rf.commitIndex && rf.log[newCommitIndex - 1].Term == rf.currentTerm {
 					rf.commitIndex = newCommitIndex
 				}
@@ -518,6 +518,8 @@ func (rf *Raft) killed() bool {
 // for any long-running work.
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
+	initLogFile()
+
 	rf := &Raft{}
 	rf.peers = peers
 	rf.persister = persister
@@ -553,7 +555,7 @@ func (rf *Raft) applyMessage(applyCh chan ApplyMsg) {
 		var messages = make([]ApplyMsg, 0)
 		for rf.commitIndex > rf.lastApplied {
 			rf.lastApplied += 1
-			DPrintf2("node: %v, isLeader: %v, term: %v, lastApplied: %v, command: %v", rf.me, rf.state == LEADER, rf.currentTerm, rf.lastApplied, rf.log[rf.lastApplied-1].Command)
+			LogInfo("node: %v, isLeader: %v, term: %v, lastApplied: %v, command: %v", rf.me, rf.state == LEADER, rf.currentTerm, rf.lastApplied, rf.log[rf.lastApplied-1].Command)
 			messages = append(messages, ApplyMsg{
 				CommandValid: true,
 				Command:      rf.log[rf.lastApplied-1].Command,

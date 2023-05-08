@@ -1,19 +1,25 @@
 package raft
 
-import "log"
+import (
+	"log"
+	"os"
+)
 
-// Debugging
-const Debug = 2
+const Debug = 2 // 0 不打印日志，1 打印日志但不重定向，2 重定向日志输出到 raft.log 文件
 
-func DPrintf1(format string, a ...interface{}) (n int, err error) {
-	if Debug == 1 {
-		log.Printf(format, a...)
+func initLogFile() {
+	if (Debug == 2) { // 交互程序重定向日志输出来方便日志展示
+		log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+		logFile, err := os.OpenFile("./raft.log", os.O_WRONLY, 0644)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.SetOutput(logFile)
 	}
-	return
 }
 
-func DPrintf2(format string, a ...interface{}) (n int, err error) {
-	if Debug == 2 {
+func LogInfo(format string, a ...interface{}) (n int, err error) {
+	if Debug != 0 {
 		log.Printf(format, a...)
 	}
 	return
