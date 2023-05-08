@@ -13,6 +13,7 @@ import (
 	"math/rand"
 	"os"
 	"runtime"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1091,6 +1092,7 @@ func TestInteract(t *testing.T) {
 	"重启(开机)节点: <open> <nodeNo>\n" +
 	"宕机(关机)节点: <close> <nodeNo>\n" +                   // 宕机模拟机器故障，如断电，进程崩溃，这种会丢内存数据
 	"输入命令(字符串模拟内容): <command> <content>\n" +
+	"显示节点状态: <show>\n" +
 	"退出: <quit>\n" +
 	"============================================="
 	fmt.Println(info)
@@ -1155,6 +1157,18 @@ func TestInteract(t *testing.T) {
 				fmt.Println("正常运行节点未过半时无法完成日志提交")
 			} else {
 				cfg.one(content, numAlive, true) // 这里是测试日志提交的函数，如果提交不了会报错，所以这里直接保证过半节点存活
+			}
+		} else if command == "show" {
+			for i := 0; i < numServer; i++ {
+				stateStr := "节点" + strconv.Itoa(i) + ": "
+				if nodeStates[i] == RUNNING {
+					stateStr += "RUNNING; "
+				} else if nodeStates[i] == DISCONNECT {
+					stateStr += "DISCONNECT; "
+				} else if nodeStates[i] == CLOSE {
+					stateStr += "CLOSE; "
+				}
+				fmt.Println(stateStr)
 			}
 		} else if command == "quit" {
 			break
