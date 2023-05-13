@@ -1134,6 +1134,7 @@ func TestInteract(t *testing.T) {
 			} else {
 				fmt.Printf("节点 %v 重启\n", nodeNo)
 				cfg.start1(nodeNo)
+				cfg.connect(nodeNo)
 				nodeStates[nodeNo] = RUNNING
 				numAlive++
 			}
@@ -1156,7 +1157,7 @@ func TestInteract(t *testing.T) {
 			if numAlive < numHalf {
 				fmt.Println("正常运行节点未过半时无法完成日志提交")
 			} else {
-				cfg.one(content, numAlive, true) // 这里是测试日志提交的函数，如果提交不了会报错，所以这里直接保证过半节点存活
+				cfg.one(content, numAlive, false) // 这里是测试日志提交的函数，如果提交不了会报错，所以这里直接保证过半节点存活
 			}
 		} else if command == "show" {
 			for i := 0; i < numServer; i++ {
