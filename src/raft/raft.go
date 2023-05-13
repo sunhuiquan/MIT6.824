@@ -153,7 +153,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		lastLogTerm = rf.log[lastLogIndex - 1].Term
 	}
 
-	DPrintf2("receive RequestVote - node: %v, isLeader: %v, term: %v, args.LastLogIndex: %v, args.LastLogTerm: %v, rf.LastLogIndex: %v, rf.lastLogTerm: %v, commitIndex: %v", rf.me, (rf.state == LEADER), rf.currentTerm, args.LastLogIndex, args.LastLogTerm, lastLogIndex, lastLogTerm, rf.commitIndex)
+	DPrintf1("节点 %v(任期:%v,是否为Leader:%v,LastLogIndex:%v,LastLogTerm:%v) 收到 RequestVote (任期%v,LastLogIndex:%v,LastLogTerm:%v)", rf.me, rf.currentTerm, rf.state == LEADER, lastLogIndex, lastLogTerm, args.Term, args.LastLogIndex, args.LastLogTerm)
 
 	if rf.currentTerm > args.Term || rf.votedFor != -1 || lastLogTerm > args.LastLogTerm || ((lastLogTerm == args.LastLogTerm) && lastLogIndex > args.LastLogIndex) { // 确保 leader有着最新的日志
 		reply.VoteGranted = false
@@ -269,7 +269,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.log = append(rf.log, entry)
 	rf.persist()
 
-	DPrintf2("Start add command - node: %v, command: %v", rf.me, command)
+	DPrintf1("Leader节点 %v 收到命令 %v", rf.me, command)
 	return len(rf.log), rf.currentTerm, true // return index, term, isLeader
 }
 
@@ -316,7 +316,7 @@ func (rf *Raft) startElection() bool {
 	reply := RequestVoteReply{}
 	me := rf.me
 
-	DPrintf2("request vote - node: %v, term: %v", rf.me, rf.currentTerm)
+	DPrintf1("节点 %v(任期:%v) 请求投票，向其他节点发送 RequertVote RPC", rf.me, rf.currentTerm)
 	rf.mu.Unlock()
 
 	var voteMutex sync.Mutex
@@ -353,7 +353,7 @@ func (rf *Raft) startElection() bool {
 				rf.nextIndex[i] = len(rf.log) + 1
 				rf.matchIndex[i] = 0
 			}
-			DPrintf2("become leader - node: %v, term: %v \n\n", rf.me, rf.currentTerm)
+			DPrintf1("节点 %v 选举成功成为任期为 %v 的Leader\n\n", rf.me, rf.currentTerm)
 			rf.mu.Unlock()
 			return true
 		} else if currFail >= winLimit {
@@ -440,9 +440,9 @@ func (rf *Raft)syncLog(peer int) {
 			rf.mu.Lock()
 			defer rf.mu.Unlock()
 
-			DPrintf2("sendAppendEntry - node: %v, isLeader: %v, term: %v, args.term: %v, peer: %v", rf.me, (rf.state == LEADER), rf.currentTerm, args.Term, peer)
+			DPrintf1("节点 %v(任期:%v,是否为Leader:%v) 向节点 %v 发送 AppendEntry RPC 调用", rf.me, rf.currentTerm, rf.state == LEADER, peer)
 			if !reply.Success {
-				DPrintf2("replyAppendEntry - node: %v, isLeader: %v, term: %v, peer: %v, reply.term: %v, reply.Success: %v\n\n", rf.me, (rf.state == LEADER), rf.currentTerm, peer, reply.Term, reply.Success)
+				DPrintf1("节点 %v 向节点 %v(任期:%v,是否为Leader:%v) 发回 AppendEntry 的 reply(是否成功:%v,返回Term:%v)\n\n", peer, rf.me, rf.currentTerm, rf.state == LEADER, reply.Success, reply.Term)
 			}
 
 			if rf.currentTerm != args.Term {
@@ -460,9 +460,6 @@ func (rf *Raft)syncLog(peer int) {
 			if reply.Success {
 				rf.nextIndex[peer] += len(args.Entries)
 				rf.matchIndex[peer] = rf.nextIndex[peer] - 1
-				DPrintf1("node: %v, isLeader: %v, peer: %v, nextIndex: %v, matchIndex: %v", rf.me, (rf.state == LEADER),
-				peer, rf.nextIndex[peer], rf.matchIndex[peer])
-
 				matchIndexes := make([]int, 0)
 				for i := 0; i < len(rf.peers); i++ {
 					if i == rf.me { // leader won't set it's own matchIndex and nextIndex
@@ -473,9 +470,10 @@ func (rf *Raft)syncLog(peer int) {
 				}
 				sort.Ints(matchIndexes)
 				newCommitIndex := matchIndexes[len(rf.peers) / 2]
+
 				// rf.log[newCommitIndex - 1].Term == rf.currentTerm is used to limit leader only can commit it's term's log
 				// see this issue on raft paper's topic 5.4.2
-				DPrintf2("replyAppendEntry - node: %v, isLeader: %v, term: %v, peer: %v, reply.term: %v, reply.Success: %v, newCommitIndex: %v, rf.commitIndex: %v, lastLogIndex: %v\n\n", rf.me, (rf.state == LEADER), rf.currentTerm, peer, reply.Term, reply.Success, newCommitIndex, rf.commitIndex, len(rf.log))
+				DPrintf1("节点 %v 向节点 %v(任期:%v,是否为Leader:%v) 发回 AppendEntry 的响应结果(是否成功:%v,返回Term:%v), 之前提交的日志最大索引:%v, 新计算的提交的日志最大索引:%v, 最大的日志索引:%v\n\n", peer, rf.me, rf.currentTerm, rf.state == LEADER, reply.Success, reply.Term, rf.commitIndex, newCommitIndex, len(rf.log))
 				if newCommitIndex > rf.commitIndex && rf.log[newCommitIndex - 1].Term == rf.currentTerm {
 					rf.commitIndex = newCommitIndex
 				}
@@ -553,7 +551,7 @@ func (rf *Raft) applyMessage(applyCh chan ApplyMsg) {
 		var messages = make([]ApplyMsg, 0)
 		for rf.commitIndex > rf.lastApplied {
 			rf.lastApplied += 1
-			DPrintf2("node: %v, isLeader: %v, term: %v, lastApplied: %v, command: %v", rf.me, rf.state == LEADER, rf.currentTerm, rf.lastApplied, rf.log[rf.lastApplied-1].Command)
+			DPrintf1("节点: %v(任期:%v,是否为Leader:%v) 应用了 %v 位置的命令 %v", rf.me, rf.currentTerm, rf.state == LEADER, rf.lastApplied, rf.log[rf.lastApplied-1].Command)
 			messages = append(messages, ApplyMsg{
 				CommandValid: true,
 				Command:      rf.log[rf.lastApplied-1].Command,
