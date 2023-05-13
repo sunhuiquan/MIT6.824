@@ -442,7 +442,7 @@ func (rf *Raft)syncLog(peer int) {
 
 			LogInfo("节点 %v(任期:%v,是否为Leader:%v) 向节点 %v 发送 AppendEntry 调用(心跳+日志传输)", rf.me, rf.currentTerm, rf.state == LEADER, peer)
 			if !reply.Success {
-			LogInfo("节点 %v 向节点 %v(任期:%v,是否为Leader:%v) 发回 AppendEntry 的响应结果(是否成功:%v,返回Term:%v)\n\n, ", peer, rf.me, rf.currentTerm, rf.state == LEADER, reply.Success, reply.Term)	
+			LogInfo("节点 %v 向节点 %v(任期:%v,是否为Leader:%v) 发回 AppendEntry 的响应结果(是否成功:%v,返回Term:%v)\n\n", peer, rf.me, rf.currentTerm, rf.state == LEADER, reply.Success, reply.Term)	
 			}
 
 			if rf.currentTerm != args.Term {
