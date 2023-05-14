@@ -276,6 +276,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 func (rf *Raft)singleRequertVote(peer int, args RequestVoteArgs, reply RequestVoteReply) bool {
 	rf.mu.Lock()
 	if rf.currentTerm != args.Term || rf.state != CANDIDATE {
+		rf.mu.Unlock()
 		return false
 	}
 	rf.mu.Unlock()
