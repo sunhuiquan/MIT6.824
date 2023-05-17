@@ -177,6 +177,8 @@ type RequestAppendArgs struct {
 type RequestAppendReply struct {
 	Term int
 	Success bool
+	ConflictIndex int
+	ConflictTerm int
 }
 
 func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply) {
@@ -184,6 +186,8 @@ func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply
 	defer rf.mu.Unlock()
 	reply.Success = false
 	reply.Term = rf.currentTerm
+	reply.ConflictIndex = -1
+	reply.ConflictTerm = - 1
 
 	if rf.currentTerm > args.Term {
 		return
@@ -191,7 +195,19 @@ func (rf *Raft) AppendEntries(args *RequestAppendArgs, reply *RequestAppendReply
 
 	rf.lastHeartbeatTime = time.Now()
 
-	if args.PrevLogIndex > 0 && (args.PrevLogIndex - 1 >= len(rf.log) || rf.log[args.PrevLogIndex - 1].Term != args.PrevLogTerm) {
+	if args.PrevLogIndex - 1 >= len(rf.log) {
+		reply.ConflictIndex = len(rf.log)
+		return
+	}
+	if args.PrevLogIndex > 0 && rf.log[args.PrevLogIndex - 1].Term != args.PrevLogTerm {
+		reply.ConflictTerm = rf.log[args.PrevLogIndex - 1].Term
+		reply.ConflictIndex = 1
+		for index := args.PrevLogIndex - 1; index >= 1; index-- {
+			if rf.log[index - 1].Term != reply.ConflictTerm {
+				reply.ConflictIndex = index + 1
+				break
+			}
+		}
 		return
 	}
 
@@ -459,7 +475,7 @@ func (rf *Raft)syncLog(peer int) {
 			}
 
 			if reply.Success {
-				rf.nextIndex[peer] += len(args.Entries)
+				rf.nextIndex[peer] = args.PrevLogIndex + 1 + len(args.Entries)
 				rf.matchIndex[peer] = rf.nextIndex[peer] - 1
 				matchIndexes := make([]int, 0)
 				for i := 0; i < len(rf.peers); i++ {
@@ -479,9 +495,22 @@ func (rf *Raft)syncLog(peer int) {
 					rf.commitIndex = newCommitIndex
 				}
 			} else {
-				rf.nextIndex[peer] -= 1
-				if rf.nextIndex[peer] < 1 {
-					rf.nextIndex[peer] = 1
+				if reply.ConflictTerm != -1 {
+					conflictTermIndex := -1
+					for index := args.PrevLogIndex; index >= 1; index-- {
+						if rf.log[index - 1].Term == reply.ConflictTerm {
+							conflictTermIndex = index
+							break
+						}
+					}
+
+					if conflictTermIndex != -1 {
+						rf.nextIndex[peer] = conflictTermIndex + 1
+					} else {
+						rf.nextIndex[peer] = reply.ConflictIndex
+					}
+				} else {
+					rf.nextIndex[peer] = reply.ConflictIndex + 1
 				}
 			}
 		}
@@ -552,7 +581,7 @@ func (rf *Raft) applyMessage(applyCh chan ApplyMsg) {
 		var messages = make([]ApplyMsg, 0)
 		for rf.commitIndex > rf.lastApplied {
 			rf.lastApplied += 1
-			DPrintf1("节点: %v(任期:%v,是否为Leader:%v) 应用了 %v 位置的命令 %v", rf.me, rf.currentTerm, rf.state == LEADER, rf.lastApplied, rf.log[rf.lastApplied-1].Command)
+			DPrintf1("节点 %v(任期:%v,是否为Leader:%v) 应用了 %v 位置的命令 %v", rf.me, rf.currentTerm, rf.state == LEADER, rf.lastApplied, rf.log[rf.lastApplied-1].Command)
 			messages = append(messages, ApplyMsg{
 				CommandValid: true,
 				Command:      rf.log[rf.lastApplied-1].Command,
