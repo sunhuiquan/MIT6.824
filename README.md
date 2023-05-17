@@ -16,3 +16,7 @@ MIT6.824 study notes and lab solutions.
 ### Part 2B
 
 ![IMG](img/pass_lab2b.png)
+
+### Part 2C
+
+![IMG](img/pass_lab2c.png)
