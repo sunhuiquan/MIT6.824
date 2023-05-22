@@ -1,12 +1,13 @@
 package kvraft
 
 import (
-	"../labgob"
-	"../labrpc"
 	"log"
-	"../raft"
 	"sync"
 	"sync/atomic"
+
+	"../labgob"
+	"../labrpc"
+	"../raft"
 )
 
 const Debug = 0
@@ -20,9 +21,13 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 
 
 type Op struct {
-	// Your definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
+	Index int
+	Term int
+	Operation string
+	Key string
+	Value string
+	Ckid int64
+	Seq int64
 }
 
 type KVServer struct {
@@ -39,11 +44,32 @@ type KVServer struct {
 
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
-	// Your code here.
+	op := Op{
+		Operation: "Get",
+		Key: args.Key,
+		Ckid: args.Ckid,
+		Seq: args.Seq,
+	}
+	_, _, isLeader := kv.rf.Start(op)
+	if !isLeader {
+		reply.Err = ErrWrongLeader
+	}
+
+
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
-	// Your code here.
+	op := Op{
+		Operation: args.Op,
+		Key: args.Key,
+		Value: args.Value,
+		Ckid: args.Ckid,
+		Seq: args.Seq,
+	}
+	_, _, isLeader := kv.rf.Start(op)
+	if !isLeader {
+		reply.Err = ErrWrongLeader
+	}
 }
 
 //
