@@ -4,6 +4,7 @@ import (
 	"log"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"../labgob"
 	"../labrpc"
@@ -21,8 +22,6 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 
 
 type Op struct {
-	Index int
-	Term int
 	Operation string
 	Key string
 	Value string
@@ -39,26 +38,67 @@ type KVServer struct {
 
 	maxraftstate int // snapshot if log grows this big
 
-	// Your definitions here.
+	// need persist to deal with real crash, but no need in this lab
+	kvStorge map[string]string // key -> value
+	executeSeq map[int64]int64 // ckid -> seq
+	executeMsg map[int]chan Op // logIndex -> channel
 }
 
-
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
+	kv.mu.Lock()
+	reply.Err = OK
+	if args.Ckid <= kv.executeSeq[args.Ckid] {
+		if value, ok := kv.kvStorge[args.Key]; ok {
+			reply.Value = value
+		} else {
+			reply.Value = ""
+		}
+		kv.mu.Unlock()
+		return
+	}
+	kv.mu.Unlock()
+
 	op := Op{
 		Operation: "Get",
 		Key: args.Key,
 		Ckid: args.Ckid,
 		Seq: args.Seq,
 	}
-	_, _, isLeader := kv.rf.Start(op)
+	index, _, isLeader := kv.rf.Start(op)
 	if !isLeader {
 		reply.Err = ErrWrongLeader
+		return
 	}
 
+	kv.mu.Lock()
+	channel := make(chan Op)
+	kv.executeMsg[index] = channel
+	kv.mu.Unlock()
+	
+	select {
+		case execOp := <-channel:
+			if execOp.Ckid != op.Ckid || execOp.Seq != op.Seq {
+				reply.Err = ErrWrongLeader
+			}
 
+		case <-time.After(time.Second * 2):
+			reply.Err = ErrWrongLeader
+	}
+
+	kv.mu.Lock()
+	close(kv.executeMsg[index])
+	kv.mu.Unlock()
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
+	kv.mu.Lock()
+	reply.Err = OK
+	if args.Ckid <= kv.executeSeq[args.Ckid] {
+		kv.mu.Unlock()
+		return
+	}
+	kv.mu.Unlock()
+
 	op := Op{
 		Operation: args.Op,
 		Key: args.Key,
@@ -66,10 +106,30 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		Ckid: args.Ckid,
 		Seq: args.Seq,
 	}
-	_, _, isLeader := kv.rf.Start(op)
+	index, _, isLeader := kv.rf.Start(op)
 	if !isLeader {
 		reply.Err = ErrWrongLeader
+		return
 	}
+
+	kv.mu.Lock()
+	channel := make(chan Op)
+	kv.executeMsg[index] = channel
+	kv.mu.Unlock()
+	
+	select {
+		case execOp := <-channel:
+			if execOp.Ckid != op.Ckid || execOp.Seq != op.Seq {
+				reply.Err = ErrWrongLeader
+			}
+
+		case <-time.After(time.Second * 2):
+			reply.Err = ErrWrongLeader
+	}
+
+	kv.mu.Lock()
+	close(kv.executeMsg[index])
+	kv.mu.Unlock()
 }
 
 //
@@ -91,6 +151,34 @@ func (kv *KVServer) Kill() {
 func (kv *KVServer) killed() bool {
 	z := atomic.LoadInt32(&kv.dead)
 	return z == 1
+}
+
+func (kv *KVServer) handleApplyLoop() {
+	for kv.killed() == false {
+		select {
+			case applyMsg := <-kv.applyCh:
+				kv.mu.Lock()
+				op := applyMsg.Command.(Op)
+				if seq, ok := kv.executeSeq[op.Ckid]; !ok || seq < op.Seq {
+					switch op.Operation {
+						case "Put":
+							kv.kvStorge[op.Key] = op.Value
+						case "Append":
+							if value, ok := kv.kvStorge[op.Key]; ok {
+								kv.kvStorge[op.Key] = value + op.Value
+							} else {
+								kv.kvStorge[op.Key] = op.Value
+							}
+					}
+					kv.executeSeq[op.Ckid] = op.Seq
+				}
+
+				if channel, ok := kv.executeMsg[applyMsg.CommandIndex]; ok {
+					channel <- op // ??? if write a closed channel
+				}
+				kv.mu.Unlock()
+		}
+	}
 }
 
 //
@@ -121,7 +209,10 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
-	// You may need initialization code here.
-
+	kv.kvStorge = make(map[string]string)
+	kv.executeSeq = make(map[int64]int64)
+	kv.executeMsg = make(map[int]chan Op)
+ 
+	go kv.handleApplyLoop()
 	return kv
 }
