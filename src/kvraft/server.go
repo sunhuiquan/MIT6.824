@@ -45,6 +45,7 @@ type KVServer struct {
 }
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
+	DPrintf("PutAppend(op: Get, key: %v) ", args.Key)
 	kv.mu.Lock()
 	reply.Err = OK
 	if args.Ckid <= kv.executeSeq[args.Ckid] {
@@ -86,11 +87,19 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	}
 
 	kv.mu.Lock()
-	close(kv.executeMsg[index])
+	delete(kv.executeMsg, index)
+
+	if value, ok := kv.kvStorge[args.Key]; ok {
+		reply.Value = value
+	} else {
+		reply.Err = ErrNoKey
+		reply.Value = ""
+	}
 	kv.mu.Unlock()
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
+	DPrintf("PutAppend(op: %v, key: %v, value: %v) ", args.Op, args.Key, args.Value)
 	kv.mu.Lock()
 	reply.Err = OK
 	if args.Ckid <= kv.executeSeq[args.Ckid] {
@@ -159,6 +168,7 @@ func (kv *KVServer) handleApplyLoop() {
 			case applyMsg := <-kv.applyCh:
 				kv.mu.Lock()
 				op := applyMsg.Command.(Op)
+				DPrintf("applyMsg(op: %v, key: %v, value: %v) ", op.Operation, op.Key, op.Value)
 				if seq, ok := kv.executeSeq[op.Ckid]; !ok || seq < op.Seq {
 					switch op.Operation {
 						case "Put":
@@ -166,15 +176,17 @@ func (kv *KVServer) handleApplyLoop() {
 						case "Append":
 							if value, ok := kv.kvStorge[op.Key]; ok {
 								kv.kvStorge[op.Key] = value + op.Value
+								DPrintf("Append1 : %v", kv.kvStorge[op.Key])
 							} else {
 								kv.kvStorge[op.Key] = op.Value
+								DPrintf("Append2 : %v", kv.kvStorge[op.Key])
 							}
 					}
 					kv.executeSeq[op.Ckid] = op.Seq
 				}
 
 				if channel, ok := kv.executeMsg[applyMsg.CommandIndex]; ok {
-					channel <- op // ??? if write a closed channel
+					channel <- op
 				}
 				kv.mu.Unlock()
 		}
