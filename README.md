@@ -23,4 +23,4 @@ MIT6.824 study notes and lab solutions.
 
 ### Part 3A
 
-![IMG](img/pass_lab3a.png)
+![IMG](img/pass_lab3a.png) TODO: 可能 unreliable 的 case 还有 bug，偶尔会 fail，等着修一下这个情况
