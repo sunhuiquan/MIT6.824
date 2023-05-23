@@ -20,3 +20,7 @@ MIT6.824 study notes and lab solutions.
 ### Part 2C
 
 ![IMG](img/pass_lab2c.png)
+
+### Part 3A
+
+![IMG](img/pass_lab3a.png)

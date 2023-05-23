@@ -137,7 +137,7 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	}
 
 	kv.mu.Lock()
-	close(kv.executeMsg[index])
+	delete(kv.executeMsg, index)
 	kv.mu.Unlock()
 }
 
