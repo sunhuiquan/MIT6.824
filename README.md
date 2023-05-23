@@ -21,6 +21,9 @@ MIT6.824 study notes and lab solutions.
 
 ![IMG](img/pass_lab2c.png)
 
+
+## Lab 3: KV Server
+
 ### Part 3A
 
 ![IMG](img/pass_lab3a.png) TODO: 可能 unreliable 的 case 还有 bug，偶尔会 fail，等着修一下这个情况
