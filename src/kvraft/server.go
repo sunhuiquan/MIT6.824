@@ -11,7 +11,7 @@ import (
 	"../raft"
 )
 
-const Debug = 0
+const Debug = 1
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -45,10 +45,10 @@ type KVServer struct {
 }
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
-	DPrintf("PutAppend(op: Get, key: %v) ", args.Key)
+	DPrintf("PutAppend(op: Get, key: %v) %v:%v", args.Key, args.Seq, kv.executeSeq[args.Ckid])
 	kv.mu.Lock()
 	reply.Err = OK
-	if args.Ckid <= kv.executeSeq[args.Ckid] {
+	if args.Seq <= kv.executeSeq[args.Ckid] {
 		if value, ok := kv.kvStorge[args.Key]; ok {
 			reply.Value = value
 		} else {
@@ -99,10 +99,10 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
-	DPrintf("PutAppend(op: %v, key: %v, value: %v) ", args.Op, args.Key, args.Value)
+	DPrintf("PutAppend(op: %v, key: %v, value: %v) %v:%v", args.Op, args.Key, args.Value, args.Seq, kv.executeSeq[args.Ckid])
 	kv.mu.Lock()
 	reply.Err = OK
-	if args.Ckid <= kv.executeSeq[args.Ckid] {
+	if args.Seq <= kv.executeSeq[args.Ckid] {
 		kv.mu.Unlock()
 		return
 	}
@@ -168,7 +168,7 @@ func (kv *KVServer) handleApplyLoop() {
 			case applyMsg := <-kv.applyCh:
 				kv.mu.Lock()
 				op := applyMsg.Command.(Op)
-				DPrintf("applyMsg(op: %v, key: %v, value: %v) ", op.Operation, op.Key, op.Value)
+				DPrintf("applyMsg(op: %v, key: %v, value: %v, Index: %v) ", op.Operation, op.Key, op.Value, applyMsg.CommandIndex)
 				if seq, ok := kv.executeSeq[op.Ckid]; !ok || seq < op.Seq {
 					switch op.Operation {
 						case "Put":
@@ -181,6 +181,8 @@ func (kv *KVServer) handleApplyLoop() {
 								kv.kvStorge[op.Key] = op.Value
 								DPrintf("Append2 : %v", kv.kvStorge[op.Key])
 							}
+						case "Get":
+							DPrintf("Get(key: %v)", op.Key)
 					}
 					kv.executeSeq[op.Ckid] = op.Seq
 				}
