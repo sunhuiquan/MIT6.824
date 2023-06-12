@@ -11,7 +11,7 @@ import (
 	"../raft"
 )
 
-const Debug = 1
+const Debug = 0
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -19,7 +19,6 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	}
 	return
 }
-
 
 type Op struct {
 	Operation string
@@ -45,8 +44,8 @@ type KVServer struct {
 }
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
-	DPrintf("PutAppend(op: Get, key: %v) %v:%v", args.Key, args.Seq, kv.executeSeq[args.Ckid])
 	kv.mu.Lock()
+	DPrintf("PutAppend(op: Get, key: %v) %v:%v", args.Key, args.Seq, kv.executeSeq[args.Ckid])
 	reply.Err = OK
 	if args.Seq <= kv.executeSeq[args.Ckid] {
 		if value, ok := kv.kvStorge[args.Key]; ok {
@@ -99,8 +98,8 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
-	DPrintf("PutAppend(op: %v, key: %v, value: %v) %v:%v", args.Op, args.Key, args.Value, args.Seq, kv.executeSeq[args.Ckid])
 	kv.mu.Lock()
+	DPrintf("PutAppend(op: %v, key: %v, value: %v) %v:%v", args.Op, args.Key, args.Value, args.Seq, kv.executeSeq[args.Ckid])
 	reply.Err = OK
 	if args.Seq <= kv.executeSeq[args.Ckid] {
 		kv.mu.Unlock()
